@@ -20,8 +20,8 @@ Justification: pnpm workspaces give strict package isolation (symlinked node_mod
 tiny-agentic/                      ← repo root
   pnpm-workspace.yaml              ← declares packages: ['packages/*']
   package.json                     ← root (private: true, scripts: build/test/lint/typecheck)
-  tsconfig.base.json               ← shared TS base (strict, ESM, Node >= 18 target)
-  .node-version                    ← 18.20.x (LTS; also .nvmrc alias)
+  tsconfig.base.json               ← shared TS base (strict, ESM, Node >= 22 target, skipLibCheck:true)
+  .node-version                    ← 22.x (Active/Maintenance LTS floor; also .nvmrc alias)
   .npmrc                           ← shamefully-hoist=false (strict isolation)
 
   packages/
@@ -55,10 +55,12 @@ A lint rule provides a lint-time check on top of the structural enforcement: the
 
 ### 1.5 Node version and module system
 
-- **Node:** `>=18.0.0` (required in `packages/core/package.json` `engines` field).
+- **Node:** `>=22.0.0` (required in `packages/core/package.json` `engines` field). Node 18 (EOL April 2025) and Node 20 (EOL April 2026) are both end-of-life as of this spec's date (2026-06); Node 22 is the lowest LTS line still receiving security support, so it is the M1 floor. See `docs/decisions.md` "skipLibCheck + @types/node pinned to the runtime floor".
 - **Module system:** ESM throughout. `"type": "module"` in every `package.json`. All imports use the `.js` extension (TypeScript's ESM transpile convention). No CommonJS.
-- **TypeScript `target`:** `ES2022` (Node 18 supports all ES2022 features natively; async generators and `using` declarations are not needed from `lib` polyfills).
+- **TypeScript `target`:** `ES2022` (Node 22 supports all ES2022 features natively; async generators and `using` declarations are not needed from `lib` polyfills).
 - **`moduleResolution`:** `Node16` (validates `.js` extension in imports, required for ESM/TS correctness).
+- **`@types/node`:** pinned to `^22` (the runtime floor) as a devDependency. Supplies the ambient `AbortSignal` type used by `Provider.stream(request, signal?)`, which is not in `lib: ["ES2022"]`.
+- **`skipLibCheck: true`** in `tsconfig.base.json` — idiomatic for a TS library: `tsc` fully checks our own `src/` but does not type-check third-party bundled `.d.ts` (e.g. vite's, pulled transitively via vitest, which reference globals absent from a runtime-accurate `@types/node@22`). Without it, a correct `@types/node@22` fails typecheck on those foreign declarations while a too-new `@types/node` would type the core against a Node newer than the supported runtime. This is what makes `pnpm -r typecheck` pass with a runtime-accurate `@types/node`. See the decision log entry above.
 
 ### 1.6 Build tool
 
@@ -77,7 +79,7 @@ tsconfig.base.json (root)
   └── packages/ui/tsconfig.json     (extends ../../tsconfig.base.json)
 ```
 
-The base sets: `"strict": true`, `"noUncheckedIndexedAccess": true`, `"exactOptionalPropertyTypes": true`, `"target": "ES2022"`, `"module": "Node16"`, `"moduleResolution": "Node16"`, `"declaration": true`, `"declarationMap": true`, `"sourceMap": true`, `"outDir": "dist"`.
+The base sets: `"strict": true`, `"noUncheckedIndexedAccess": true`, `"exactOptionalPropertyTypes": true`, `"target": "ES2022"`, `"module": "Node16"`, `"moduleResolution": "Node16"`, `"types": ["node"]`, `"skipLibCheck": true`, `"declaration": true`, `"declarationMap": true`, `"sourceMap": true`, `"outDir": "dist"`. (`skipLibCheck: true` and the `@types/node@22` pin are explained in §1.5; the full base config is in the code-architecture doc.)
 
 **`exactOptionalPropertyTypes` ergonomics:** With this flag enabled, TypeScript distinguishes between a property being absent and a property being explicitly set to `undefined`. Where a callee's interface declares an optional property as `T` (not `T | undefined`), you cannot pass `key: undefined` — even if `key` is typed as `T | undefined`. The safe pattern is conditional spread: `...(value !== undefined ? { key: value } : {})`. This appears in the codebase wherever an optional value is forwarded to a third-party API (e.g., `baseURL` in `AnthropicProvider`, `cwd`/`env` in `ExecOptions`). Implementers must use the conditional-spread pattern rather than `key: optionalValue` for any optional field.
 
@@ -389,7 +391,7 @@ export type ProviderRequest = {
 
 export type ProviderEvent =
   | { type: "text_delta";    text: string }
-  | { type: "tool_use";      id: string; name: string; input: unknown }
+  | { type: "tool_use";      id: string; name: string; input: unknown; inputParseError?: boolean }
   | { type: "message_stop";  stopReason: "end_turn" | "tool_use" | "max_tokens" | string };
 
 export interface Provider {
@@ -750,9 +752,16 @@ The `AbortSignal` is the second argument to `stream()`, not a field on `Provider
 `ProviderRequest` → Anthropic `Messages.MessageCreateParamsStreaming`:
 
 ```
+// max_tokens precedence: per-request override → provider default → hardcoded floor.
+// The provider resolves (options.maxTokens ?? 32000) into `this.maxTokens` at
+// construction and passes it to mapRequest as defaultMaxTokens; the mapper then
+// applies (request.maxTokens ?? defaultMaxTokens). The Anthropic Messages API
+// REQUIRES max_tokens, so ProviderRequest.maxTokens stays optional while the
+// provider always sends a concrete value. Default = 32000 (see decisions log
+// "maxTokens default = 32000").
 anthropicParams = {
   model:      options.model,
-  max_tokens: request.maxTokens ?? options.maxTokens ?? 32000,
+  max_tokens: request.maxTokens ?? this.maxTokens,   // this.maxTokens = options.maxTokens ?? 32000
   system:     request.systemPrompt,
   messages:   mapMessages(request.messages),
   tools:      mapTools(request.tools),
@@ -786,15 +795,29 @@ content_block_delta:
   input_json_delta     → accumulate into currentToolInput[blockIndex]
 content_block_stop:
   if block was tool_use:
-    parse accumulated JSON string → input (or catch parse error)
-    yield ProviderEvent { type: "tool_use", id, name, input }
-message_delta          → (ignored; stop_reason extracted from here)
-message_stop           → yield ProviderEvent { type: "message_stop", stopReason }
+    finish = accumulator.finishBlock(index)   // discriminated result
+    if finish.kind === "ok":
+      yield ProviderEvent { type: "tool_use", id, name, input: finish.input }
+    else: // finish.kind === "parse_error"
+      yield ProviderEvent { type: "tool_use", id, name, input: {}, inputParseError: true }
+        // input is a serializable placeholder {}; the parse-error signal rides on
+        // the inputParseError boolean (see below)
+message_delta          → if delta.stop_reason: accumulator.setStopReason(delta.stop_reason)
+message_stop           → yield ProviderEvent { type: "message_stop", stopReason: accumulator.takeStopReason() }
+                          // takeStopReason() returns the cached reason, defaulting to "end_turn"
 ```
 
-The `input_json_delta` accumulation is done per content block index, since a single turn can have multiple tool_use blocks streaming concurrently. The mapper maintains a `Map<number, string>` (block index → accumulated JSON string) and flushes at `content_block_stop`.
+The `input_json_delta` accumulation is done per content block index, since a single turn can have multiple tool_use blocks streaming concurrently. The `InputAccumulator` maintains a `Map<number, { id, name, json }>` (block index → tool identity + accumulated JSON string) and flushes at `content_block_stop` via `finishBlock(index)`, which returns a **discriminated result**. The same accumulator also **caches the `stop_reason`**: it reads `stop_reason` off the `message_delta` event (`setStopReason`) and emits it on the `message_stop` ProviderEvent (`takeStopReason`), defaulting to `"end_turn"` when no `message_delta` carried one. (`stop_reason` arrives on `message_delta`, never on `message_stop` itself, so it must be cached across the two events.)
 
-JSON parse errors during `input_json_delta` accumulation are caught in the mapper and converted to a synthetic `tool_use` event with a sentinel `input` value that the registry will fail to validate — producing a `tool_result` error fed back to the model (edge case 6.1).
+```ts
+type FinishResult =
+  | { kind: "ok";          id: string; name: string; input: unknown }
+  | { kind: "parse_error"; id: string; name: string };  // accumulated JSON was unparseable
+```
+
+**Malformed JSON is signalled by a dedicated boolean flag, not by a value placed in `input`.** When the accumulated `input_json_delta` string does not `JSON.parse`, `finishBlock` returns `{ kind: "parse_error" }`. The mapper still yields a `tool_use` ProviderEvent (so the loop sees the call and pairs a `tool_result` to its `tool_use_id`, keeping the Anthropic message shape valid), but sets the event's `input` to an empty object `{}` (a valid, JSON-serializable placeholder) and flags the failure with **`inputParseError: true`** — an optional boolean on the provider-agnostic `tool_use` ProviderEvent. The loop carries that flag onto its `pendingToolUses` entry (`parseError`) and into `runTools`, which checks `tu.parseError` **before Zod validation** and emits the exact tool-result error `"Tool '<name>': could not parse tool input as JSON"` (product spec §6.1, §5.6) — distinct from, and not conflated with, the Zod `"... invalid input — <zod message>"` path. The model sees a clear parse-failure message and can retry.
+
+Keeping the signal off `input` (rather than on it, as an earlier design did with a `unique symbol` sentinel) is load-bearing: the assistant turn the loop persists into history embeds `input` verbatim, and a symbol is **not** JSON-serializable — `JSON.stringify` silently drops a symbol-valued property, so threading that turn back into the next request would produce a `tool_use` block with no `input`, an Anthropic 400, and a killed run a turn after the parse error. An empty-object `input` plus a boolean flag keeps history valid on every turn and keeps the internal signal off the public event surface (`tool_use_start.toolInput` is the serializable `{}`, never a sentinel). (Two earlier designs are rejected: injecting `input: null` to fail Zod produced the wrong message; placing a `PARSE_ERROR` symbol in `input` corrupted threaded history. See `docs/decisions.md`.)
 
 ### 5.3 Retry and backoff (`retry.ts`)
 
@@ -839,7 +862,9 @@ The `logger` callback (if present) is called at these points:
 - On each retry attempt: `{ level: "info", event: "retry_attempt", attempt, delayMs, error }`
 - On final failure: `{ level: "error", event: "request_failed", error }`
 
-For streaming events, individual `ProviderEvent` values are NOT logged (too voluminous). A `verbose` flag and an `event_received` log entry could be added in M2 if needed.
+**`retry_attempt` is best-effort in M1.** Because `AnthropicProvider` delegates retry to the Anthropic SDK (decision "Provider contract owns retry"), and the SDK exposes no public per-retry hook, the `retry_attempt` entry fires **only** from the `withRetry` utility — which is not wired into `AnthropicProvider` in M1. In practice no `retry_attempt` log is emitted during an M1 Anthropic run; the SDK retries silently. The `LogEntry` union nonetheless keeps the variant so the shape is stable when a hand-rolled-retry provider (or a vendor that exposes a hook) lands. This is the same reason the product spec's states-matrix `provider_retry` event is "not available while retry is SDK-delegated" rather than a future improvement (see §10.1).
+
+For streaming events, individual `ProviderEvent` values are NOT logged in M1 — the `LogEntry` union is exactly `request_sent | retry_attempt | request_failed`, with no per-`ProviderEvent` variant (too voluminous, and per the brainstorm Flow H correction). A `verbose` flag and an `event_received` log entry could be added in M2 if needed.
 
 ---
 
@@ -849,7 +874,7 @@ Each edge case from §6 of the product spec maps to a concrete module.
 
 | Edge case | Owning module | Mechanism |
 |-----------|---------------|-----------|
-| 6.1 Malformed JSON tool input | `providers/anthropic.ts` (mapper) | `JSON.parse` in `input_json_delta` accumulation; catch → sentinel input that fails Zod |
+| 6.1 Malformed JSON tool input | `providers/anthropic.ts` (mapper) + `loop/runTools.ts` | `InputAccumulator.finishBlock` returns `{ kind: "parse_error" }` on unparseable JSON → mapper yields a `tool_use` event with `input: {}` and `inputParseError: true` → loop threads the flag onto its `pendingToolUses` entry → `runTools` checks `tu.parseError` **before** Zod and emits `"Tool '<name>': could not parse tool input as JSON"` |
 | 6.2 Unknown tool name | `loop/runTools.ts` | `registry.findByName()` returns `undefined` → error `tool_result` |
 | 6.3 Multiple tools in one turn | `loop/loop.ts` | All `tool_use` events buffered before calling `runTools`; results bundled into one user message |
 | 6.4 Tool `call` throws | `loop/runTools.ts` | `try/catch` around `await tool.call()`; error fed back as tool error |
@@ -871,6 +896,7 @@ Each edge case from §6 of the product spec maps to a concrete module.
 All error strings produced by the framework follow the product spec's §5.6 format:
 
 - Unknown tool: `"Unknown tool: '<name>'"`
+- Unparseable tool input: `"Tool '<name>': could not parse tool input as JSON"` (the `inputParseError` flag path; emitted before Zod, distinct from the Zod path below)
 - Zod validation: `"Tool '<name>': invalid input — <zod message>"`
 - Serialization failure: `"Tool '<name>': could not serialize result — <error message>"`
 - API key: `"AnthropicProvider: ANTHROPIC_API_KEY is required"`
@@ -995,6 +1021,19 @@ class MockPlatform implements Platform {
 | 7.12 No core fs/process imports | CI lint | Same lint rule; blocks `import fs`, `import child_process`, and any bare `process` reference in core src except `platform/node.ts`. `platform/node.ts` is the sole permitted location for Node globals. |
 | 7.13 Env context injection | `env-context.test.ts` | MockPlatform with scripted exec responses. Assert buildEnvContext() output contains cwd, date, git branch. |
 | 7.14 Logger off by default | `agent.test.ts` | AnthropicProvider with no logger; mock the console; assert no output during run (requires an integration test or mock SDK). |
+| 7.15 Git-absent degradation (§6.15) | `env-context.test.ts` | MockPlatform whose `exec("git ...")` returns `exitCode !== 0` (or whose `exec` throws). Assert buildEnvContext() omits the `Git branch`/`Git status` lines but still returns cwd + date, and that a full `agent.run()` over a MockProvider reaches `agent_done` with no `agent_error`. |
+| 7.16 Multiple tools in one turn (§6.3) | `loop.test.ts` | MockProvider emits two `tool_use` events + `message_stop(tool_use)` in one turn, then a tool-free turn. Assert: two `tool_result` events yielded, and the NEXT request the MockProvider receives has the prior assistant message (two `tool_use` blocks) followed by ONE user message containing two `tool_result` content blocks. |
+| 7.17 Abort on abandonment (§6.9) | `agent.test.ts` | MockProvider records its `AbortSignal` and yields slowly; the test `break`s out of the `for await` mid-stream. Assert the recorded signal's `aborted === true` after the loop exits (the generator's `finally` fired `abortCtrl.abort()`). |
+| 7.18 Streaming surfaces incrementally (§5.3 states) | `loop.test.ts` | MockProvider emits several `text_delta` events before `message_stop` within one turn. Assert the collected event order interleaves multiple `text_delta` events ahead of `turn_complete` (i.e. deltas are yielded as they arrive, not buffered to turn end). |
+| 7.x Malformed tool input (§6.1) | `anthropic-mapper.test.ts` + `runTools.test.ts` | Mapper: feed `input_json_delta` chunks forming invalid JSON; assert `finishBlock` returns `{ kind: "parse_error" }` and `translateStreamEvent` yields a `tool_use` event whose `inputParseError === true` and whose `input` deep-equals `{}`. runTools: pass a tool_use entry with `parseError: true`; assert the `tool_result` carries exactly `"Tool '<name>': could not parse tool input as JSON"` and `isError: true`, emitted without invoking Zod. |
+
+**Note for the plan refine — task ownership of the new criteria.** Criteria 7.15–7.18 and the §6.1 malformed-input case map onto existing tasks; they add assertions, not new modules:
+
+- **7.15 git-absent degradation** → the env-context task (the task that owns `env/context.ts` + `env-context.test.ts`). 6.15 behavior already exists in the skeleton; 7.15 just adds the negative-path assertion. Already partly covered by the original 7.13 test's scaffolding.
+- **7.16 multiple-tools-in-one-turn** → the loop task (`loop/loop.ts` + `loop.test.ts`). The bundling logic exists; this was **not explicitly tested before** — the plan must add a two-`tool_use` fixture and a received-message assertion.
+- **7.17 abort-on-abandonment** → the agent task (`agent.ts` + `agent.test.ts`), since the `try/finally` + `abortCtrl.abort()` lives in `Agent.run`. The MockProvider must be extended to record its `AbortSignal`. **Not explicitly tested before.**
+- **7.18 incremental streaming** → the loop task (`loop.test.ts`). Asserts deltas interleave ahead of `turn_complete`. **Not explicitly tested before.**
+- **§6.1 malformed tool input (the `inputParseError` flag path)** → split across the mapper task (`anthropic-mapper.test.ts`: `finishBlock` returns `parse_error`, event has `inputParseError === true` and `input` deep-equals `{}`) and the runTools task (`runTools.test.ts`: a tool_use entry with `parseError: true` → exact `"could not parse tool input as JSON"` message, no Zod call). The mapper task already exists (decisions: "Anthropic mapper is its own task"); both gain one assertion.
 
 ### 8.4 Unit vs integration boundary
 
@@ -1039,6 +1078,18 @@ All significant questions have been resolved in this spec. The following is the 
 3. **`zod-to-json-schema` target and options.** Using `openApi3` target with `$refStrategy: "none"` is specified in §3.5. The package `zod-to-json-schema` must be added as a direct dependency of `packages/core` (not a peer dependency — consumers do not call it directly). The planner should include this in the `ToolRegistry` implementation task.
 
 4. **`@anthropic-ai/sdk` dependency placement — RESOLVED.** Listed as an **optional peer dependency** of `packages/core` (`peerDependencies` + `peerDependenciesMeta.optional: true`), per the package.json in the code-architecture doc. Consumers who use `AnthropicProvider` install it; OpenAI-only consumers do not (and get no install warning). Also kept in `devDependencies` for local development/tests.
+
+5. **`@types/node` / `skipLibCheck` / Node floor — RESOLVED.** `skipLibCheck: true` in `tsconfig.base.json`; `@types/node` pinned to `^22` (devDependency, matching the `engines.node >=22.0.0` floor). This makes `pnpm -r typecheck` pass with a runtime-accurate `@types/node` (without it, vitest-transitive vite `.d.ts` referencing `WebSocket`/newer globals breaks a `@types/node@22` build under `skipLibCheck: false`). Node 18 and 20 are both EOL as of 2026-06; 22 is the lowest supported LTS. See §1.5 and the decision-log entry.
+
+### 10.1 Confirmed M2 deferrals (from the brainstorm refine; none block M1)
+
+The brainstorm refine surfaced three forward items for the engineering refine to confirm or schedule. All are M2; the seams are noted so M1 does not foreclose them:
+
+1. **Stream-idle watchdog (§6.17).** M1 relies entirely on the Anthropic SDK's built-in request timeout (the SDK applies a default per-request timeout and aborts on it); the engine adds **no** dedicated idle watchdog. This is acceptable for M1 — the SDK timeout bounds a hung stream. If a future provider/SDK lacks a usable idle timeout, an engine-level watchdog (the reference's 90s `STREAM_IDLE_TIMEOUT_MS`) would attach inside the `for await` over `provider.stream(...)` in `loop/loop.ts` (a `Promise.race` between `iterator.next()` and a reset-on-event timer). Deferred to M2.
+
+2. **Cooperative tool cancellation seam (§6.18).** M1 aborts only the in-flight provider stream; `Tool.call` does not receive the `AbortSignal`, so a tool already executing runs to completion before the generator's `finally` returns. **Decision on where to reserve the seam: thread the signal as an optional field on `ToolCallContext`, not as a fourth `call` argument.** `ToolCallContext` is already the SDK-extensible, optional-by-contract seam (interface merging; all fields optional), so adding `signal?: AbortSignal` there in M2 is non-breaking and keeps `Tool.call`'s positional arity stable at three. A fourth positional argument would change every tool signature and is rejected. No M1 code change — flagged so the seam is reserved.
+
+3. **`provider_retry` event feasibility.** Because retry is delegated to the Anthropic SDK (decision "Provider contract owns retry"), surfacing each retry as an engine event would require the SDK to expose a per-retry hook. The `@anthropic-ai/sdk` does **not** expose a public retry callback while it owns retry internally — so a `ProviderEvent`/`AgentEvent` `provider_retry` is **not feasible in M1** while retry is SDK-delegated. Consequently the `LogEntry` `retry_attempt` entry is **best-effort**: it fires only on the `withRetry` code path (unused by `AnthropicProvider` in M1), so in practice no `retry_attempt` log is emitted during M1 Anthropic runs. The product spec's states-matrix `provider_retry` note should be read as "not available while retry is SDK-delegated," not "future improvement." If retry is ever hand-rolled (the deliberate-learning task, not M1) or a vendor exposes a hook, the event becomes feasible.
 
 ---
 

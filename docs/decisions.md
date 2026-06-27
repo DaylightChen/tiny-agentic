@@ -305,4 +305,67 @@ Dependency direction is strictly one-way: UI → SDK → core. Lower layers neve
 
 **Consequences:** Task-09 may require fixes to production code from tasks 02–08. Those fixes are small (e.g., removing an accidental `process.cwd()` call outside platform/node.ts) and are expected to be caught here rather than in task-10.
 
+---
+
+## 2026-06-27 — skipLibCheck: true + @types/node pinned to the runtime floor (Node 22)
+
+**Phase:** engineering (refine pass)
+
+**Decision:** Three coupled settings:
+1. **`skipLibCheck: true`** in `tsconfig.base.json` (was `false`).
+2. **`@types/node` pinned to `^22`** as a devDependency of `packages/core` (was unspecified). Adds `"types": ["node"]` to the base config.
+3. **Node floor bumped to `>=22.0.0`** in `engines` (was `>=18.0.0`); `.node-version` → `22.x`; `target` stays `ES2022`.
+
+**Rationale:** The core needs `@types/node` to type `AbortSignal` (used in `Provider.stream(request, signal?)`), which is absent from `lib: ["ES2022"]`. Discovered during the implement phase: with `skipLibCheck: false`, `tsc` also type-checks third-party bundled `.d.ts` pulled in transitively — notably vite's declarations via vitest, which reference the `WebSocket` global. A runtime-accurate `@types/node` then fails on globals only present in a newer `@types/node`, while a too-new `@types/node` would type the core against a Node newer than the supported runtime. `skipLibCheck: true` is idiomatic for a TS library (third-party `.d.ts` are not ours to type-check; `tsc` still fully checks our own `src/`) and is the resolution that lets `pnpm -r typecheck` pass with a runtime-accurate `@types/node` (verified: `tsc --noEmit --skipLibCheck` passes cleanly). For the floor: the original spec targeted Node 18, but Node 18 reached EOL April 2025 and Node 20 reached EOL April 2026 — both are end-of-life as of this pass (2026-06). Node 22 is the lowest LTS line still receiving security support, so it is the correct runtime floor; `@types/node` is pinned to the same major (`^22`) so types track the supported runtime. (The task suggested Node 20, but 20 is also now EOL — 22 is the defensible choice.)
+
+**Rejected alternatives:** (a) Keep `skipLibCheck: false` and pin `@types/node@26` — types the core against a Node newer than the runtime floor and couples typecheck health to whichever `@types/*` the test toolchain drags in. (b) Drop `@types/node` and hand-declare `AbortSignal` — fragile, drifts from the real lib types. (c) Keep Node 18/20 floor — both are EOL, no security patches.
+
+**Consequences:** `pnpm -r typecheck` passes with a runtime-accurate `@types/node@22`. `@types/node` contributes types only (devDependency, stripped at build), not a runtime dependency. Our own source remains fully type-checked. The Node floor bump (18→22) is a documentation/CI change only — no source change, since `target: ES2022` was already satisfied by Node 18+.
+
+---
+
+## 2026-06-27 — Malformed streamed tool input uses an `inputParseError` boolean flag + dedicated message
+
+**Phase:** engineering (refine pass)
+
+**Decision:** Unparseable streamed tool input (Anthropic `input_json_delta` that does not `JSON.parse`) is signalled by a dedicated optional boolean — `inputParseError: true` on the provider-agnostic `tool_use` ProviderEvent — while the event's `input` stays a normal, JSON-serializable value (an empty object `{}`). It is NOT signalled by a value placed in `input` (neither an `input: null` that fails Zod, nor a `unique symbol` sentinel). The mapper's `InputAccumulator.finishBlock(index)` returns a discriminated `{ kind: "ok" | "parse_error", ... }`; on `parse_error` the mapper still yields a `tool_use` ProviderEvent (preserving the `tool_use`/`tool_result` pairing the Anthropic message shape requires) with `input: {}` and `inputParseError: true`. The loop threads the flag onto its `pendingToolUses` entry as `parseError`; `runTools` checks `tu.parseError` **before Zod validation** and emits the exact tool-result error `"Tool '<name>': could not parse tool input as JSON"`. `runTools` imports nothing from `types/provider.ts` for this.
+
+**Rationale:** Reconciles the engineering design with the refined brainstorm (§6.1, §5.6), which specifies that exact message — distinct from the Zod `"... invalid input — <zod message>"` path. Two earlier designs are rejected:
+
+1. **`input: null` to fail Zod** — produced the wrong message, conflated "couldn't parse JSON" with "parsed but failed schema," and gave the model a less actionable error.
+2. **A `PARSE_ERROR` `unique symbol` in `input`** — a symbol is **not JSON-serializable**. The loop persists the assistant turn (including each tool_use block's `input`) into `workingMessages`; when that turn is threaded back into the next request, `JSON.stringify` **silently drops** the symbol-valued `input`, producing a `tool_use` block with no `input` → Anthropic 400 → `agent_error`. So the parse-error path that should let the model retry instead killed the run a turn later, and the internal sentinel leaked onto the public surface (`tool_use_start.toolInput` stringified to `undefined`).
+
+An empty-object `input` plus a boolean flag keeps the persisted history valid on every turn (it always round-trips through `JSON.stringify`) and keeps the signal entirely off the public event surface — `tool_use_start.toolInput` is the serializable `{}`, never a sentinel.
+
+**Consequences:** No `PARSE_ERROR`/`ParseError` export exists; `types/provider.ts` defines `tool_use` as `{ type: "tool_use"; id; name; input: unknown; inputParseError?: boolean }`. `runTools` no longer imports from `types/provider.ts`; `ToolUseEntry` gains `parseError?: boolean` and the loop's `pendingToolUses` entries carry `parseError: boolean`. `InputAccumulator.finishBlock` returns a discriminated result. The malformed-input edge case (6.1) is owned jointly by the mapper task (sets `input: {}` + `inputParseError: true`) and the runTools task (flag → message), each with a test assertion (mapper asserts `inputParseError === true` and `input` deep-equals `{}`; runTools passes `parseError: true` and asserts the message). Nothing new is exported from the public `index.ts`.
+
+---
+
+## 2026-06-27 — Provider default max_tokens = 32000
+
+**Phase:** engineering (refine pass)
+
+**Decision:** `AnthropicProvider`'s default `max_tokens` is **32000**. `ProviderRequest.maxTokens` stays optional; the provider always sends a concrete value with precedence `request.maxTokens ?? options.maxTokens ?? 32000` (resolved to `this.maxTokens = options.maxTokens ?? 32000` at construction, then `request.maxTokens ?? this.maxTokens` in the mapper).
+
+**Rationale:** The Anthropic Messages API *requires* `max_tokens`, so a default must exist; the brainstorm refine flagged it had no home in either doc. 32000 is a generous M1 cap that comfortably covers agentic turns (tool calls + reasoning) without risking truncation, while staying well under model output limits. The reference escalates to 64k on its non-streaming fallback, which M1 omits, so the streaming default is the only value M1 needs. A per-request override (`ProviderRequest.maxTokens`) and a per-provider override (`AnthropicProviderOptions.maxTokens`) both exist for callers who need a different cap.
+
+**Consequences:** `AnthropicProviderOptions.maxTokens` documented as "default: 32000"; `ProviderRequest.maxTokens` documented as "defaults to 32000 in AnthropicProvider if not set." Spec §5.1 and the `anthropic.ts` / `anthropic-mapper.ts` skeletons agree on the same precedence chain.
+
+---
+
+## 2026-06-27 — M2 seams confirmed: tool-cancellation via ToolCallContext; provider_retry not feasible while SDK-delegated
+
+**Phase:** engineering (refine pass)
+
+**Decision:** Three brainstorm-flagged forward items confirmed as M2, with their seams pinned:
+1. **Stream-idle watchdog (§6.17):** none in M1 — rely on the Anthropic SDK's built-in request timeout. A future engine watchdog attaches at the `for await` over `provider.stream(...)` in `loop/loop.ts`.
+2. **Cooperative tool cancellation (§6.18):** reserve the seam as an **optional `signal?: AbortSignal` field on `ToolCallContext`** (the already-extensible, all-optional SDK seam), **not** a fourth positional `Tool.call` argument. Keeps `call`'s arity stable at three and is non-breaking to add in M2.
+3. **`provider_retry` event:** **not feasible in M1** while retry is delegated to the Anthropic SDK (no public per-retry hook). The `LogEntry` `retry_attempt` variant is best-effort — it fires only from the unused-in-M1 `withRetry` path, so no `retry_attempt` log is emitted during M1 Anthropic runs. The states-matrix `provider_retry` note reads "not available while retry is SDK-delegated," not "future improvement."
+
+**Rationale:** Each keeps M1 scope minimal while not foreclosing the M2 addition. Routing tool cancellation through `ToolCallContext` reuses the one intentionally-open core extension point (interface merging, all-optional fields) rather than churning every `Tool.call` signature. The `provider_retry` infeasibility follows directly from the "Provider contract owns retry" decision — surfacing retries as events would contradict SDK delegation.
+
+**Consequences:** No M1 code change from this decision; it records where the M2 seams live so M1 does not paint them into a corner. `LogEntry`/`AgentEvent`/`ProviderEvent` unions stay as-is (no `provider_retry`/`event_received`).
+
+---
+
 _See `docs/research/` for the subsystem analysis underpinning these decisions._

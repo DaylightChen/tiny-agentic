@@ -8,7 +8,9 @@
 project
 
 ## Current Phase
-**implement** (not started)
+**engineering** (in progress — Opus refine pass)
+
+> **Refine pass (2026-06-27):** the scope was rewound from `implement` to `brainstorm` to re-run brainstorm → engineering → plan → implement with all phased-dev agents pinned to Opus. Git history is preserved (all prior commits intact; Sonnet implement work tagged `sonnet-run-checkpoint`). The task-progress table below reflects the prior Sonnet run and will be regenerated when the refined plan re-enters `implement`.
 
 ## Last Completed
 - `research` phase satisfied (2026-06-27, backfilled on the 0.4.0→0.5.0 plugin migration). Output: the pre-existing `docs/research/` subsystem map of the Claude Code reference (`docs/research/00-overview.md` … `06-ui-tui-layer.md`).
@@ -18,7 +20,7 @@ project
 - `task-01-repo-scaffold` complete (`575b2e7`): pnpm monorepo scaffolded — core/sdk/ui packages, examples workspace, shared tsconfig, boundary ESLint, tsup/Vitest. 1 dev-loop iteration, reviewer-approved.
 
 ## What's Next
-- Run `/phased-dev:start-task 02` to implement the core shared types (`messages`, `platform`, `tool` + `defineTool`, `provider`, `events`). Tasks execute strictly in order.
+- Opus `brainstormer` refines the product design spec → user approves → advance to `engineering` (Opus `architect`, also resolving the `@types/node`/`skipLibCheck` decision) → `plan` (Opus `planner`) → redo `implement` tasks.
 
 ## Task Progress
 

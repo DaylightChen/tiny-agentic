@@ -2,7 +2,7 @@
 
 **Date:** 2026-06-26
 **Milestone:** 1 — the `tiny-agentic` core package
-**Status:** Authoritative input to the engineering phase. Supersedes the original draft of the same name.
+**Status:** Authoritative input to the engineering phase. Refined in place 2026-06-27 (Opus pass) — see the refinement notes at the end.
 
 ---
 
@@ -74,12 +74,15 @@ The secondary problem: the Claude Code source (v2.1.88) is the best publicly ava
 A TypeScript developer building a custom agent-powered tool — a file summarizer, a code reviewer, an automated test runner, a personal assistant. They know TypeScript and async/await. They may or may not have used the Anthropic SDK directly. They want to write:
 
 ```ts
-const agent = new Agent({ provider, tools: [readFileTool, listFilesTool], platform });
+const agent = new Agent({ provider, tools: [readFileTool, writeFileTool], platform });
 
-for await (const event of agent.run("Summarize all .ts files in ./src")) {
+for await (const event of agent.run("Summarize ./src/index.ts")) {
   console.log(event);
 }
 ```
+
+(The two built-in tools shipped in M1 are `read_file` and `write_file`; a directory-listing
+tool is deferred until the `Platform` interface gains a listing capability in M2.)
 
 ...or, for a non-streaming one-shot, use the convenience helper:
 
@@ -89,7 +92,7 @@ const text = await collectText(agent.run("Summarize all .ts files in ./src"));
 
 ...and have it work: the model runs, calls the tools they registered, loops, and terminates. They do not want to think about streaming event accumulators, tool-use message formatting, or retry semantics.
 
-**Constraints:** Working in Node >=18. May want Anthropic today, OpenAI tomorrow. Probably building a CLI or server, not a browser app. Does not want a peer dependency on React or Ink.
+**Constraints:** Working in Node >=22 (the supported LTS floor — Node 18 and 20 are both EOL as of mid-2026; see the engineering spec §1.5). May want Anthropic today, OpenAI tomorrow. Probably building a CLI or server, not a browser app. Does not want a peer dependency on React or Ink.
 
 **What they care about:** API clarity (can they read and understand the types?), predictability (does the loop always terminate?), debuggability (can they log what's happening?), extensibility (can they add a tool in 10 lines?).
 
@@ -139,7 +142,7 @@ The terminal event (`agent_done` | `max_turns_exceeded` | `agent_error`) carries
 
 **Description:** A first-class `Tool` type that developers implement to expose capabilities to the model. Every tool has: a name, a Zod schema (`inputSchema`, mandatory — serialized via `zod-to-json-schema`), a description, and a `call` function. The `call` function receives validated arguments, a `Platform` instance, and an extensible tool-call context object, and returns a result.
 
-The **extensible tool-call context** is the seam that lets higher layers (the SDK) inject additional capabilities — such as a skill registry or command registry — into running tools without modifying the core. The core defines the context object with a minimal set of fields for M1 and allows the SDK to widen it. This mirrors the reference's `ToolUseContext`. For M1, the context carries only what the core itself needs (e.g., the current `Agent` run handle for future sub-agent use); SDK-layer fields are added by the SDK without touching core code.
+The **extensible tool-call context** is the seam that lets higher layers (the SDK) inject additional capabilities — such as a skill registry or command registry — into running tools without modifying the core. The core declares `ToolCallContext` as an open `interface`; the SDK widens it via TypeScript interface merging (`declare module 'tiny-agentic'`). For M1 the interface is **empty** — the engine constructs `{}` and passes it to every `Tool.call`, so the third argument exists and is typed but carries no fields yet. This mirrors the reference's `ToolUseContext`. SDK-layer fields (and, later, a sub-agent run handle when sub-agents land) are added without touching core code, and must always be **optional** so existing tools keep compiling.
 
 The `Platform` interface is a capability bundle injected at call time. It provides environment operations (`readFile`, `writeFile`, `exec`, etc.) as abstract methods. The framework ships a `NodePlatform` that implements these with Node.js APIs. A `BrowserPlatform` or a `MockPlatform` (for tests) can be substituted without touching the tool logic. This keeps the core's built-in tools environment-agnostic.
 
@@ -177,7 +180,7 @@ The framework handles: serializing Zod schemas to JSON Schema for the model, val
 
 ### Feature 3: Anthropic Provider (with Streaming)
 
-**Description:** A concrete provider implementation that calls the Anthropic Messages API, streams the response, and translates Anthropic's streaming event types into the framework's canonical `ProviderEvent` union. The provider accepts an API key, model name, optional retry count, optional base URL, and an optional logger callback. Basic retry logic (exponential backoff on 429 and 5xx) is included.
+**Description:** A concrete provider implementation that calls the Anthropic Messages API, streams the response, and translates Anthropic's streaming event types into the framework's canonical `ProviderEvent` union. The provider accepts an API key, model name, optional `maxRetries`, optional base URL, and an optional logger callback. Retry of transient errors (429, 5xx, connection) is part of the `Provider` contract but is **delegated to the Anthropic SDK** — the provider constructs `new Anthropic({ apiKey, baseURL, maxRetries })` and the SDK applies exponential backoff with jitter and honors `Retry-After` across both stream construction and consumption. (The earlier draft hand-wrapped stream *construction* in a retry helper, which is a no-op because transient errors surface during stream *iteration*; that approach is rejected. See `docs/decisions.md` "Provider contract owns retry".) Retry is a per-provider responsibility expressed through a uniform `maxRetries` option, not a shared core code path.
 
 **User-visible behavior:**
 
@@ -195,7 +198,7 @@ Swapping the provider (when OpenAI lands in M2) requires changing only the `prov
 
 ### Feature 4: Environment Context in System Prompt
 
-**Description:** The framework automatically inserts a minimal environment context block into the system prompt: current working directory, current date, git branch and status (if the process is inside a git repo). This mirrors the Claude Code reference's `context.ts`. The env context is computed once per `run()` call and prepended to the developer-supplied system prompt. Env context collection uses the injected `Platform` (e.g., `platform.exec("git status")`) so the core remains environment-agnostic.
+**Description:** The framework automatically inserts a minimal environment context block into the system prompt: current working directory, current date, git branch and status (if the process is inside a git repo). This mirrors the Claude Code reference's `context.ts`. The env context is computed once per `run()` call and prepended to the developer-supplied system prompt. **All** environment access goes through the injected `Platform` — the working directory via `platform.cwd()` and the git state via `platform.exec("git ...")` — so the core never references a Node global (`process`, `fs`, `child_process`) and remains environment-agnostic. The date is the only piece read from a runtime built-in (`new Date()`), which is universal across environments.
 
 **User-visible behavior:**
 
@@ -216,7 +219,7 @@ If git is not installed or the cwd is not a git repo, the git lines are silently
 
 ### Feature 5: Platform Capability Interface
 
-**Description:** An abstract `Platform` interface that decouples tool `call` implementations from the concrete runtime environment. The interface defines the operations that built-in tools need: `readFile`, `writeFile`, `exec`, and similar. The framework ships a `NodePlatform` concrete implementation. The core itself imports no `fs`, `child_process`, or other Node-specific modules — it only holds the `Platform` interface type. A test harness, browser polyfill, or mock can be substituted by implementing the interface.
+**Description:** An abstract `Platform` interface that decouples tool `call` implementations from the concrete runtime environment. In M1 the interface has exactly four methods: `cwd()` (used by the env-context builder), `readFile`, `writeFile` (backing the two M1 built-in tools), and `exec` (used by the env-context builder for git and available to tools). The framework ships a `NodePlatform` concrete implementation. The core itself imports no `fs`, `child_process`, or other Node-specific modules, and references no Node global (`process`, etc.) outside `platform/node.ts` — it only holds the `Platform` interface type. A test harness, browser polyfill, or mock can be substituted by implementing the four methods. The interface is intentionally narrow; new methods are added in M2 only when a new built-in tool requires one (a breaking change for existing `Platform` implementations, acceptable while the surface is small).
 
 This makes the core package truly environment-agnostic: the same `read_file` tool definition works in Node (via `NodePlatform`) or in a future browser environment (via a different `Platform` implementation), because the tool's `call` function never calls `fs` directly.
 
@@ -231,6 +234,7 @@ const agent = new Agent({ provider, tools, platform: new NodePlatform() });
 
 // Testing: use a mock
 class MockPlatform implements Platform {
+  cwd() { return "/mock/project"; }
   async readFile(path: string) { return "mock content"; }
   async writeFile(path: string, content: string) {}
   async exec(cmd: string) { return { stdout: "", stderr: "", exitCode: 0 }; }
@@ -422,7 +426,7 @@ The model requests a tool with an invalid argument (e.g., a path that does not e
 
 **Flow C: Handling an API error.**
 
-The Anthropic API returns a 429 or 5xx. The provider retries with exponential backoff (up to a configured `maxRetries`, defaulting to 3). If all retries fail, the generator yields an `agent_error` event and terminates. The caller inspects `event.error` to get the underlying error.
+The Anthropic API returns a 429 or 5xx. The Anthropic SDK (to which the provider delegates retry) retries with exponential backoff and jitter, up to the configured `maxRetries` (default 3). If all retries are exhausted, the error surfaces out of the provider's stream as a thrown exception; the engine catches it, yields an `agent_error` event, and terminates. The caller inspects `event.error` to get the underlying error.
 
 **Flow D: Detecting when the agent loops without progress.**
 
@@ -461,7 +465,7 @@ const agent = new Agent({
 
 **Flow H: Subscribing to provider-level debug information.**
 
-The developer passes a `logger` callback to `AnthropicProvider`. It receives structured log entries (request sent, events received, retries attempted). Off by default; no performance cost when absent.
+The developer passes a `logger` callback to `AnthropicProvider`. It receives structured `LogEntry` values at three points — `request_sent` (before each API call), `retry_attempt` (on each SDK retry, if the SDK exposes a hook), and `request_failed` (on final failure). Individual streaming `ProviderEvent` values are **not** logged in M1 (too voluminous). Off by default; no performance cost when absent.
 
 ```ts
 const provider = new AnthropicProvider({
@@ -488,7 +492,10 @@ Because there is no UI, "states" are the conditions the generator is in at each 
 | **Provider error (retrying)** | (no event during retry) | Backoff happening silently. A future improvement may add a `provider_retry` event. |
 | **Provider error (fatal)** | `agent_error` | All retries exhausted or unretryable error. `event.error` is the underlying Error. |
 | **Tool schema validation failure** | `tool_result` (with `isError: true`) | Zod validation failed on model's tool args. Error text fed back to model. Engine continues. |
-| **Tool call execution failure** | `tool_result` (with `isError: true`) | `call` threw. Error fed back to model. Engine continues. |
+| **Malformed tool input (unparseable JSON)** | `tool_result` (with `isError: true`) | Accumulated `input_json_delta` did not form valid JSON. Error fed back to model. Engine continues. (§6.1) |
+| **Unknown tool** | `tool_result` (with `isError: true`) | Model named a tool not in the registry. No user code runs; error fed back to model. Engine continues. (§6.2) |
+| **Tool call execution failure** | `tool_result` (with `isError: true`) | `call` threw or rejected. Error fed back to model. Engine continues. |
+| **Run abandoned (caller breaks `for await`)** | (no further events) | The generator's `finally` aborts the in-flight provider stream via `AbortController` and returns. No terminal event is observed by the caller (they have stopped iterating). (§6.9) |
 
 **Empty response state:** If the model returns an empty assistant message (no text, no tools), the engine treats it as a tool-free turn and terminates: `turn_complete` → `agent_done` → generator return. Not an error.
 
@@ -553,15 +560,28 @@ type Terminal =
   | { reason: "agent_error"; messages: Message[]; error: Error };
 ```
 
-**Error messages (thrown or in `agent_error.error`):**
+Two distinct audiences, two distinct message styles:
+
+1. **Fatal errors** — thrown, or carried in `agent_error.error.message`. Read by the *developer*. Prefixed with the originating component (`AnthropicProvider:` / `Agent:`).
+2. **Tool-result errors** — the text of a `tool_result` block with `isError: true`, fed *to the model* for self-correction. No component prefix; written so the model can act on it. The same text is available to the developer on the `tool_result` event for logging.
+
+**Fatal errors (thrown or in `agent_error.error.message`):**
 
 - API key missing: `"AnthropicProvider: ANTHROPIC_API_KEY is required"`
 - Model not found: `"AnthropicProvider: model '<name>' not found (HTTP 404)"`
-- Rate limit exhausted after retries: `"AnthropicProvider: rate limit exceeded after 3 retries"`
-- Tool not found: `"Agent: model called unknown tool '<name>'; returning error to model"`
-- Max turns: `"Agent: maxTurns (10) exceeded; terminating"`
+- Rate limit exhausted after retries: `"AnthropicProvider: rate limit exceeded after <maxRetries> retries"`
+- Context length exceeded: `"AnthropicProvider: request exceeds the model's context window (HTTP 400)"`
+- Max turns: `"Agent: maxTurns (<n>) exceeded; terminating"`
+
+**Tool-result errors (fed to the model as `tool_result` with `isError: true`):**
+
+- Unknown tool: `"Unknown tool: '<name>'"`
+- Unparseable tool input: `"Tool '<name>': could not parse tool input as JSON"`
 - Zod validation: `"Tool '<name>': invalid input — <Zod error message>"`
+- Tool `call` threw: `"Tool '<name>': <error message>"`
 - Tool result serialization failure: `"Tool '<name>': could not serialize result — <error>"`
+
+These strings are part of the product contract for the model's self-correction loop and the developer's logs; they should stay stable across patch versions.
 
 **Key exported names:**
 
@@ -661,7 +681,9 @@ All fields are typed; no `any` on the public surface. The union is discriminated
 
 ```ts
 interface Provider {
-  stream(request: ProviderRequest): AsyncGenerator<ProviderEvent>;
+  // The AbortSignal is operational context (created per run() by the engine), not model
+  // input — it is a second argument, not a field on ProviderRequest. Matches fetch(url, { signal }).
+  stream(request: ProviderRequest, signal?: AbortSignal): AsyncGenerator<ProviderEvent>;
 }
 
 type ProviderRequest = {
@@ -677,22 +699,23 @@ type ProviderEvent =
   | { type: "message_stop"; stopReason: string };
 ```
 
-The engine calls `provider.stream(request)` and iterates the generator. Retry and backoff on transient errors (429, 5xx) are the **provider's** responsibility (see Feature 3) — the engine does not retry. Errors that survive the provider's retries propagate as thrown exceptions; the engine catches them and yields `agent_error`.
+The engine calls `provider.stream(request, signal)` and iterates the generator, threading the run's `AbortController.signal` so an abandoned run (§6.9) cancels the in-flight HTTP request. Retry and backoff on transient errors (429, 5xx, connection) are part of the `Provider` contract — expressed uniformly as a `maxRetries` option on each provider — and are delegated by the provider to its vendor SDK (see Feature 3). The engine does not retry. Errors that survive the provider's retries propagate as thrown exceptions; the engine catches them and yields `agent_error`.
 
 **Platform interface (the environment seam):**
 
 ```ts
 interface Platform {
+  cwd(): string;                                              // env-context working directory
   readFile(path: string, encoding?: string): Promise<string>;
   writeFile(path: string, content: string): Promise<void>;
   exec(command: string, options?: ExecOptions): Promise<ExecResult>;
-  // additional methods added as built-in tools require them
+  // additional methods added in M2 only as new built-in tools require them
 }
 
 type ExecResult = { stdout: string; stderr: string; exitCode: number };
 ```
 
-The exact set of methods is finalized in the engineering phase, driven by which built-in tools land in M1. The interface is intentionally narrow — only the operations actually needed.
+The M1 method set is exactly these four (`cwd`, `readFile`, `writeFile`, `exec`), finalized in the engineering phase and driven by what M1 actually needs: `cwd` and `exec` for the env-context builder, `readFile`/`writeFile` for the two built-in tools. The interface is intentionally narrow — only the operations actually needed. Routing `cwd` through the platform (rather than `process.cwd()`) is what keeps the core free of Node globals.
 
 **Tool-call context (the SDK extension seam):**
 
@@ -704,7 +727,7 @@ interface ToolCallContext {
 }
 ```
 
-`Tool.call` has the signature `(input: TInput, platform: Platform, context: ToolCallContext) => Promise<unknown>`. Tools that do not need the context simply ignore the third argument. The context object is constructed by the engine per tool-call invocation; the exact mechanism (interface merging vs. generic parameter) is an engineering-phase decision. The product-level commitment is: the parameter exists, is typed, and is extensible without breaking existing tool implementations.
+`Tool.call` has the signature `(input: TInput, platform: Platform, context: ToolCallContext) => Promise<unknown>`. Tools that do not need the context simply ignore the third argument. The context object is constructed by the engine per tool-call invocation. The engineering phase has since fixed the extension mechanism as **TypeScript interface merging**: `ToolCallContext` is declared as an `interface` the SDK reopens via `declare module 'tiny-agentic'`, rather than a generic `Tool<TInput, TContext>` (which would force `Agent` to be generic and leak SDK types into the core's public API). The product-level commitment stands: the parameter exists, is typed, and is extensible without breaking existing tool implementations — and the SDK must only ever add **optional** fields (a required field would break tools that do not supply it). See `docs/decisions.md` "ToolCallContext extension mechanism".
 
 ---
 
@@ -776,11 +799,19 @@ The env context builder calls `platform.exec("git ...")`. If git is not installe
 
 The developer passes a `NodePlatform` and a built-in tool calls `platform.readFile(path)` where `path` does not exist. The platform method throws (ENOENT). The framework catches this at the `call` boundary (same as 6.4) and feeds the error back to the model as a tool error. The agent continues.
 
+**6.17 Stream stalls (no chunks arriving).**
+
+The provider's HTTP stream connects but stops emitting chunks (a hung connection). In M1 the framework does not impose its own idle-timeout watchdog; it relies on the underlying vendor SDK's request timeout. If the SDK times out, the error surfaces as a thrown exception and the engine yields `agent_error`. A dedicated stream-idle watchdog (the reference's 90s `STREAM_IDLE_TIMEOUT_MS`) is deferred to M2. This is a known M1 limitation, parallel to the no-per-tool-timeout limitation (§6.5).
+
+**6.18 Abort fires while a tool is executing.**
+
+The caller breaks the `for await` loop (or an external abort triggers) during tool execution rather than during streaming. The engine's `AbortController` aborts the provider seam, but a tool's `call` that ignores cancellation will run to completion before the generator's `finally` returns — the engine does not forcibly interrupt synchronous tool work in M1. The tool's result is discarded (the generator has been abandoned). Threading the `AbortSignal` into `Tool.call` for cooperative cancellation is deferred; M1 only guarantees the in-flight *provider stream* is aborted.
+
 ---
 
 ## 7. Success Criteria
 
-Milestone 1 is complete when all of the following are observable:
+Milestone 1 is complete when all of the following (1–18) are observable. Criteria 1–14 cover the original behavior set; 15–18 close gaps in git degradation, multi-tool turns, abort cleanup, and incremental streaming.
 
 1. **Basic agent run:** `agent.run("What is 2+2?")` with no tools calls the Anthropic API, streams text, yields `text_delta` events, and terminates with `agent_done`. Observable by running the example script.
 
@@ -806,18 +837,64 @@ Milestone 1 is complete when all of the following are observable:
 
 12. **No core filesystem imports:** the core package (`src/` excluding `platform/node`) has no direct `import fs` or `import child_process`. All environment I/O is behind the `Platform` interface. Observable via a lint rule or import graph check.
 
-13. **Env context injection:** the system prompt sent to the model (via mock provider or debug logger) contains the cwd, date, and git status block.
+13. **Env context injection:** the system prompt sent to the model (captured via a mock provider) begins with an env-context block containing the cwd (sourced from `platform.cwd()`, verifiable by asserting a mock platform's cwd value appears), the date, and — when `platform.exec("git ...")` returns a zero exit code — the git branch and status. The developer-supplied `systemPrompt` follows the block. When no `systemPrompt` is given, only the env-context block is sent.
 
 14. **Logger is off by default:** `new AnthropicProvider({ apiKey, model })` with no `logger` produces no console output during a run. Observable in the test suite.
+
+15. **Git-absent degradation:** with a mock platform whose `exec("git ...")` returns a non-zero exit code (or throws), the env-context block omits the git lines and the run proceeds normally to `agent_done`. No error is yielded. (§6.15)
+
+16. **Multiple tools in one turn:** when the mock provider emits two `tool_use` blocks in a single assistant turn, both execute, two `tool_result` events are yielded, and both results are bundled into a single user message (one user message with two `tool_result` content blocks) before the next provider call. Observable via the mock provider's received-message assertion. (§6.3)
+
+17. **Abort on abandonment:** breaking out of the `for await` loop mid-stream causes the engine's `finally` to abort the provider stream. Observable with a mock provider that records whether its `AbortSignal` fired. (§6.9)
+
+18. **Streaming surfaces incrementally:** `text_delta` events are yielded as the mock provider emits chunks, not buffered until turn end. Observable by asserting an interleaving of `text_delta` events before `turn_complete` within a single turn.
 
 ---
 
 ## 8. Open Questions
 
-None. All open questions from the initial draft have been resolved. See `docs/decisions.md` entries "Milestone-1 open questions resolved" and "Three-package architecture" for the binding decisions.
+**No M1-blocking open questions remain.** All open questions from the initial draft have been resolved — see `docs/decisions.md` entries "Milestone-1 open questions resolved" and "Three-package architecture" for the binding decisions.
 
-The engineering phase may surface new architectural questions (e.g., exact `Platform` method signatures beyond the three listed above, monorepo vs. single-package layout for M1, the precise TypeScript mechanism for widening `ToolCallContext` in the SDK, and the exact shape of the serialized `ToolSchema` passed to providers). Those are engineering-phase concerns; this spec does not pre-answer them.
+Several questions that were open at first draft have since been **answered by the engineering phase** and folded into this refined spec (see `docs/decisions.md`): the `Platform` M1 method set is `cwd`/`readFile`/`writeFile`/`exec`; the repo is a pnpm-workspace monorepo; `ToolCallContext` is widened via TypeScript interface merging; `ToolSchema` is `zod-to-json-schema` with `target: "openApi3"`; the `AbortSignal` is a second argument to `Provider.stream`; and retry is delegated to the vendor SDK. This refined brainstorm now describes those resolved choices rather than leaving them open.
+
+**Deferred-to-M2 items surfaced during this refinement** (documented in the edge cases; flagged here so they are not forgotten — none blocks M1):
+- **Stream-idle watchdog** (§6.17) — M1 relies on the vendor SDK's request timeout; no dedicated idle watchdog. The reference uses a 90s `STREAM_IDLE_TIMEOUT_MS`.
+- **Cooperative tool cancellation** (§6.18) — M1 aborts only the provider stream; `Tool.call` does not receive the `AbortSignal`. If desired, threading the signal into the tool-call context is a small, non-breaking M2 addition.
+- **Per-tool timeout** (§6.5) and **tool-result truncation** (§6.6) — already noted as M2 deferrals.
+
+These are M2 scope, not M1 open questions. The engineering phase may still surface lower-level questions (the exact serialized `ToolSchema` field names, the precise `ExecOptions` shape), which it owns.
 
 ---
 
 *Spec complete. This document is the authoritative product design for tiny-agentic milestone 1 (the core package). The engineering phase produces architecture and interface decisions on top of this spec. Locked decisions in `docs/decisions.md` take precedence where they overlap.*
+
+---
+
+## Refinement notes (Opus pass — 2026-06-27)
+
+This pass refined the spec in place for clarity, completeness, and consistency with the engineering decisions that were locked *after* the original brainstorm draft. No locked product decision was reversed. The brainstorm intentionally pre-dated several engineering decisions; the largest category of change is **bringing the spec into alignment with those already-approved decisions** so the brainstorm and `docs/decisions.md` no longer contradict each other.
+
+### (a) Material changes made, and why
+
+- **Retry ownership corrected (Feature 3, Flow C, §5.7 Provider interface).** The original spec said the Anthropic provider "includes basic retry logic (exponential backoff on 429 and 5xx)." The locked decision "Provider contract owns retry; SDKs delegate" rejected the hand-rolled wrapper (it only wrapped stream *construction*, a no-op, since transient errors surface during stream *iteration*). Rewrote to: retry is a `Provider` contract expressed as a uniform `maxRetries` option, **delegated to the Anthropic SDK** via `new Anthropic({ maxRetries })`.
+- **`AbortSignal` added to the `Provider` interface (§5.7).** The interface showed `stream(request)`; the locked decision threads the signal as a second argument: `stream(request, signal?)`. This also makes edge case 6.9 (abandoned generator → abort the stream) coherent with the interface.
+- **`Platform.cwd()` added (Feature 4, Feature 5, §5.7).** The locked decision "`Platform` gains `cwd()`; env context never touches `process`" added a fourth method and forbade Node globals in the core outside `platform/node.ts`. The `Platform` interface, the `MockPlatform` example (which was missing `cwd()` and would not have compiled), and the Feature 4 env-context prose now reflect this.
+- **Built-in tool set pinned to `read_file` + `write_file`.** The opening code example used `listFilesTool` / `read_file, list_files`, but no listing capability exists on the M1 `Platform`. Replaced with `readFileTool` / `writeFileTool` and an explicit note that directory listing is deferred to M2.
+- **`ToolCallContext` reconciled to "empty `{}` in M1" (Feature 2, §5.7).** Feature 2 previously implied the context "carries the current `Agent` run handle"; the locked decision makes M1's interface empty (the SDK widens it via interface merging) and requires SDK-added fields to be optional. Aligned the prose and named the mechanism.
+- **Error-message microcopy split by audience (§5.6).** The original list mixed developer-facing fatal errors with model-facing tool-result errors, and the unknown-tool string was inconsistent between §5.6 (`"Agent: model called unknown tool..."`) and §6.2 (`"Unknown tool: '<name>'"`). Reorganized into two tables — **fatal errors** (component-prefixed, in `agent_error.error`) and **tool-result errors** (clean, fed to the model) — and standardized on `"Unknown tool: '<name>'"`. Genericized `maxTurns (10)` → `maxTurns (<n>)` and `3 retries` → `<maxRetries> retries`. Added a context-length fatal message.
+
+### (b) Gaps closed
+
+- **States matrix** gained explicit rows for malformed tool input, unknown tool, and run-abandonment/abort — previously only described in scattered prose.
+- **Edge cases** gained §6.17 (stream stalls / idle — M1 relies on the SDK timeout, no watchdog) and §6.18 (abort fires during tool execution — only the provider stream is aborted; tools are not cooperatively cancelled in M1).
+- **Success criteria** extended from 14 to 18: added git-absent degradation (15), multiple-tools-in-one-turn bundling (16), abort-on-abandonment (17), and incremental-streaming (18). Tightened criterion 13 (env context) to assert the cwd comes from `platform.cwd()` and that the git block is conditional on a zero exit code — making it verifiable with a mock platform.
+- **Open questions (§8)** rewritten: it now records which first-draft questions the engineering phase has since answered (and which this spec now folds in) and lists the M2 deferrals surfaced here, so they are not lost.
+
+### (c) Proposals / open items for the downstream engineering refine
+
+None of these change M1 scope; they are flags for the engineering refine to confirm or schedule:
+
+1. **Stream-idle watchdog (M2).** M1 leans entirely on the vendor SDK's request timeout. If a provider/SDK ever lacks a usable idle timeout, an engine-level watchdog (reference: 90s) becomes necessary. Engineering should confirm the Anthropic SDK's default timeout is acceptable for M1 and note where a watchdog would attach.
+2. **Cooperative tool cancellation (M2).** M1 aborts only the provider stream. Threading the run's `AbortSignal` into `Tool.call` (most naturally via the already-existing `ToolCallContext`, since it is the SDK-extensible seam — or as a fourth `call` argument) is a clean, non-breaking addition. Worth deciding the shape now so the seam is reserved, even if unused in M1.
+3. **`provider_retry` event.** The states matrix notes retries happen "silently" and a future `provider_retry` event "may" be added. Because retry is now delegated to the vendor SDK, surfacing retry attempts as engine events would require the SDK to expose a retry hook. Engineering should confirm whether the Anthropic SDK exposes one; if not, this event is not feasible in M1 and the matrix note should be downgraded from "future improvement" to "not available while retry is SDK-delegated."
+4. **`maxTokens` default.** `ProviderRequest.maxTokens` is optional with no stated default. The Anthropic Messages API *requires* `max_tokens`. Engineering must define the provider's default `max_tokens` (the reference escalates to 64k on the non-streaming fallback, which M1 omits). This is an engineering-phase detail but currently has no home in either the spec or the decisions log.

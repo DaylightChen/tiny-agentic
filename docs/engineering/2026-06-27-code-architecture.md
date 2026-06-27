@@ -192,8 +192,19 @@ export type ProviderRequest = {
 /** Canonical streaming events yielded by a provider. Provider-agnostic. */
 export type ProviderEvent =
   | { type: "text_delta";   text: string }
-  | { type: "tool_use";     id: string; name: string; input: unknown }
+  | { type: "tool_use";     id: string; name: string; input: unknown; inputParseError?: boolean }
   | { type: "message_stop"; stopReason: "end_turn" | "tool_use" | "max_tokens" | string };
+
+// Malformed streamed tool input (§6.1) is signalled by the optional
+// `inputParseError: true` boolean on a tool_use event, NOT by a sentinel value
+// in `input`. When the accumulated argument chunks are not valid JSON, the
+// provider's stream mapper sets `input: {}` (a valid, JSON-serializable
+// placeholder) and `inputParseError: true`. `runTools` checks the flag — before
+// Zod validation — and emits the dedicated "Tool '<name>': could not parse tool
+// input as JSON" tool-result error, distinct from a Zod validation failure.
+// Keeping `input` a normal JSON value (never a symbol) means the assistant
+// turn the loop persists stays serializable when threaded back into the next
+// request, and no internal sentinel leaks onto the public event surface.
 
 /**
  * Structured log entry passed to the optional logger callback.
@@ -380,7 +391,7 @@ export async function* agentLoop(
 
     // Stream model
     const textChunks: string[] = [];
-    const pendingToolUses: Array<{ id: string; name: string; input: unknown }> = [];
+    const pendingToolUses: Array<{ id: string; name: string; input: unknown; parseError: boolean }> = [];
 
     try {
       for await (const event of provider.stream(
@@ -391,7 +402,7 @@ export async function* agentLoop(
           textChunks.push(event.text);
           yield { type: "text_delta", text: event.text };
         } else if (event.type === "tool_use") {
-          pendingToolUses.push({ id: event.id, name: event.name, input: event.input });
+          pendingToolUses.push({ id: event.id, name: event.name, input: event.input, parseError: event.inputParseError ?? false });
           yield { type: "tool_use_start", toolName: event.name, toolInput: event.input };
         }
         // message_stop is consumed but not yielded
@@ -409,6 +420,10 @@ export async function* agentLoop(
       assistantContent.push({ type: "text", text: textChunks.join("") });
     }
     for (const tu of pendingToolUses) {
+      // tu.input is always a serializable JSON value ({} on a parse error), never
+      // a sentinel — so this assistant turn stays valid when threaded back into a
+      // later request. The parse-error signal rides on tu.parseError, consumed by
+      // runTools below; it is intentionally NOT persisted into history.
       assistantContent.push({ type: "tool_use", id: tu.id, name: tu.name, input: tu.input });
     }
     // Skip empty assistant turns (no text, no tools — e.g. a refusal). Pushing
@@ -479,7 +494,7 @@ import type { Platform } from "../types/platform.js";
 import type { ToolCallContext } from "../types/tool.js";
 import { ToolRegistry } from "../tools/registry.js";
 
-type ToolUseEntry = { id: string; name: string; input: unknown };
+type ToolUseEntry = { id: string; name: string; input: unknown; parseError?: boolean };
 
 /**
  * Sequential tool execution for M1.
@@ -501,6 +516,21 @@ export async function* runTools(
         toolName: tu.name,
         toolCallId: tu.id,
         result: `Unknown tool: '${tu.name}'`,
+        isError: true,
+      };
+      continue;
+    }
+
+    // Malformed streamed tool input (§6.1). The mapper could not JSON.parse the
+    // accumulated input_json_delta and flagged this entry with parseError: true
+    // (its `input` is a placeholder {}). Detect it BEFORE Zod so the model gets
+    // the dedicated parse-error message, not an ambiguous Zod validation failure.
+    if (tu.parseError) {
+      yield {
+        type: "tool_result",
+        toolName: tool.name,
+        toolCallId: tu.id,
+        result: `Tool '${tool.name}': could not parse tool input as JSON`,
         isError: true,
       };
       continue;
@@ -686,6 +716,155 @@ export async function collectEvents(
   return { events, terminal };
 }
 ```
+
+---
+
+## `packages/core/src/providers/anthropic-mapper.ts` (skeleton)
+
+```ts
+import type Anthropic from "@anthropic-ai/sdk";
+import type { ProviderRequest, ProviderEvent, ToolSchema } from "../types/provider.js";
+
+// Malformed streamed tool input (§6.1) is signalled provider-agnostically by the
+// optional `inputParseError: true` boolean on a tool_use ProviderEvent, with
+// `input` set to a valid placeholder {}. runTools detects the flag before Zod and
+// emits §6.1's message. No sentinel value is placed in `input`, so the assistant
+// turn the loop persists stays JSON-serializable when threaded into the next request.
+
+/** ProviderRequest → Anthropic streaming params. */
+export function mapRequest(
+  request: ProviderRequest,
+  model: string,
+  defaultMaxTokens: number,
+): Anthropic.Messages.MessageCreateParamsStreaming {
+  return {
+    model,
+    // ProviderRequest.maxTokens is optional; the provider always sends a concrete
+    // value because the Anthropic API requires max_tokens. Precedence here:
+    // per-request override (request.maxTokens) → provider default (defaultMaxTokens,
+    // which the provider resolved as options.maxTokens ?? 32000 at construction).
+    max_tokens: request.maxTokens ?? defaultMaxTokens,
+    system: request.systemPrompt,
+    messages: request.messages as Anthropic.MessageParam[], // structurally compatible
+    tools: mapTools(request.tools),
+    stream: true,
+  };
+}
+
+function mapTools(schemas: ToolSchema[]): Anthropic.Tool[] {
+  return schemas.map((s) => ({
+    name: s.name,
+    description: s.description,
+    input_schema: s.inputSchema as Anthropic.Tool.InputSchema,
+  }));
+}
+
+/**
+ * Stateful accumulator for streamed tool_use input. The Anthropic stream sends
+ * a tool_use block's arguments as a sequence of input_json_delta chunks that
+ * must be concatenated and parsed once at content_block_stop. One instance per
+ * provider.stream() call; tracks every concurrent block by index.
+ */
+type FinishResult =
+  | { kind: "ok";          id: string; name: string; input: unknown }
+  | { kind: "parse_error"; id: string; name: string };
+
+export class InputAccumulator {
+  private readonly blocks = new Map<number, { id: string; name: string; json: string }>();
+  private stopReason: string | undefined;
+
+  /** Cache the stop_reason seen on a message_delta event. */
+  setStopReason(reason: string): void {
+    this.stopReason = reason;
+  }
+
+  /** Return the cached stop_reason at message_stop, defaulting to "end_turn". */
+  takeStopReason(): string {
+    return this.stopReason ?? "end_turn";
+  }
+
+  /** Called at content_block_start for a tool_use block. */
+  startBlock(index: number, id: string, name: string): void {
+    this.blocks.set(index, { id, name, json: "" });
+  }
+
+  /** Called for each input_json_delta on a block. */
+  appendDelta(index: number, partialJson: string): void {
+    const block = this.blocks.get(index);
+    if (block) block.json += partialJson;
+  }
+
+  /**
+   * Called at content_block_stop. Returns a discriminated result: "ok" with the
+   * parsed input, or "parse_error" when the accumulated JSON is unparseable.
+   * The caller (translateStreamEvent) maps "parse_error" to a tool_use event with
+   * `input: {}` and `inputParseError: true` — the boolean flag, not a value in
+   * `input`, carries the signal, so runTools can tell a genuine parse failure
+   * apart from a tool that legitimately takes `{}`/null while keeping `input`
+   * JSON-serializable.
+   * An empty buffer is treated as `{}` (Anthropic emits no deltas for a no-arg call).
+   */
+  finishBlock(index: number): FinishResult {
+    const block = this.blocks.get(index);
+    if (!block) return { kind: "parse_error", id: "", name: "" };
+    this.blocks.delete(index);
+    const raw = block.json.trim();
+    try {
+      const input = raw === "" ? {} : JSON.parse(raw);
+      return { kind: "ok", id: block.id, name: block.name, input };
+    } catch {
+      return { kind: "parse_error", id: block.id, name: block.name };
+    }
+  }
+}
+
+/**
+ * Translate one Anthropic stream event into zero or more ProviderEvents,
+ * threading per-block state through the accumulator.
+ */
+export function* translateStreamEvent(
+  event: Anthropic.MessageStreamEvent,
+  acc: InputAccumulator,
+): Generator<ProviderEvent> {
+  switch (event.type) {
+    case "content_block_start":
+      if (event.content_block.type === "tool_use") {
+        acc.startBlock(event.index, event.content_block.id, event.content_block.name);
+      }
+      return;
+    case "content_block_delta":
+      if (event.delta.type === "text_delta") {
+        yield { type: "text_delta", text: event.delta.text };
+      } else if (event.delta.type === "input_json_delta") {
+        acc.appendDelta(event.index, event.delta.partial_json);
+      }
+      return;
+    case "content_block_stop": {
+      const finish = acc.finishBlock(event.index);
+      if (!finish.id) return; // not a tool_use block (text block stop)
+      if (finish.kind === "ok") {
+        yield { type: "tool_use", id: finish.id, name: finish.name, input: finish.input };
+      } else {
+        // parse_error → placeholder {} input + inputParseError flag; runTools emits
+        // the dedicated §6.1 message. `input` stays JSON-serializable for history.
+        yield { type: "tool_use", id: finish.id, name: finish.name, input: {}, inputParseError: true };
+      }
+      return;
+    }
+    case "message_delta":
+      // stop_reason lives on the message_delta; cache it for message_stop below.
+      if (event.delta?.stop_reason) acc.setStopReason(event.delta.stop_reason);
+      return;
+    case "message_stop":
+      yield { type: "message_stop", stopReason: acc.takeStopReason() };
+      return;
+    default:
+      return; // message_start, ping, etc. — ignored in M1
+  }
+}
+```
+
+> Note: `content_block_stop` does not carry the block type, so `finishBlock` returns an empty `id` for non-tool (text) blocks — the caller skips emitting a `tool_use` for those. The real `stop_reason` is cached on the `InputAccumulator` from `message_delta` (`setStopReason`) and emitted on the `message_stop` ProviderEvent (`takeStopReason`, defaulting to `"end_turn"` if no delta carried one). This stateful per-block accumulation is the highest-risk module in M1 and has its own task + test file (`anthropic-mapper.test.ts`); see `docs/decisions.md` "Anthropic mapper is its own task".
 
 ---
 
@@ -953,7 +1132,7 @@ export { writeFileTool } from "./tools/builtin/writeFile.js";
   "description": "Headless agentic engine: agent loop, tools, provider abstraction, typed event stream.",
   "type": "module",
   "license": "MIT",
-  "engines": { "node": ">=18.0.0" },
+  "engines": { "node": ">=22.0.0" },
   "exports": {
     ".": {
       "import": "./dist/index.js",
@@ -990,6 +1169,7 @@ export { writeFileTool } from "./tools/builtin/writeFile.js";
   },
   "devDependencies": {
     "@anthropic-ai/sdk": "^0.52.0",
+    "@types/node": "^22.0.0",
     "typescript": "^5.7.0",
     "tsup": "^8.0.0",
     "vitest": "^3.0.0"
@@ -998,6 +1178,8 @@ export { writeFileTool } from "./tools/builtin/writeFile.js";
 ```
 
 Note: `@anthropic-ai/sdk` is an **optional peer dependency** (`peerDependenciesMeta.optional: true`) — a consumer who uses `AnthropicProvider` installs it themselves; the core entry point never imports it, so an OpenAI-only consumer is unaffected and gets no install warning. It is also in `devDependencies` for local development and tests. `zod` is a (required) peer dependency because consumers author tool schemas with it directly.
+
+`@types/node` is a **devDependency pinned to the runtime floor** (`^22`, matching `engines.node` `>=22.0.0`). It supplies the ambient `AbortSignal` type used in `Provider.stream(request, signal?)` (absent from `lib: ["ES2022"]`), and pinning it to the supported Node major keeps the core typed against the runtime it actually targets rather than a newer Node. It is intentionally **not** a runtime `dependency` — it contributes only types, stripped at build. The matching `skipLibCheck: true` in `tsconfig.base.json` (above) is what makes `pnpm -r typecheck` pass with this runtime-accurate version: it prevents `tsc` from type-checking unrelated third-party `.d.ts` (e.g. vite's, pulled via vitest) that reference globals only present in a newer `@types/node`.
 
 ---
 
@@ -1044,15 +1226,18 @@ packages:
     "lib": ["ES2022"],
     "module": "Node16",
     "moduleResolution": "Node16",
+    "types": ["node"],
     "declaration": true,
     "declarationMap": true,
     "sourceMap": true,
     "esModuleInterop": true,
-    "skipLibCheck": false,
+    "skipLibCheck": true,
     "forceConsistentCasingInFileNames": true
   }
 }
 ```
+
+**`skipLibCheck: true` (and `types: ["node"]`).** The core needs `@types/node` to type `AbortSignal` (used in `Provider.stream(req, signal?)`), which is absent from `lib: ["ES2022"]`. `@types/node` is pinned to the **runtime floor** (`^22`, see below). With `skipLibCheck: false`, `tsc` also type-checks third-party bundled `.d.ts` pulled in transitively (e.g. vite's declarations via vitest, which reference the `WebSocket` global): a runtime-accurate `@types/node@22` then fails on globals that only exist in newer `@types/node`, while a too-new `@types/node` would type the core against a Node newer than the supported runtime. `skipLibCheck: true` is the idiomatic setting for a TypeScript library — third-party `.d.ts` files are not ours to type-check, and `tsc` still fully type-checks **our own** `src/`. Verified: `tsc --noEmit --skipLibCheck` passes cleanly with a runtime-accurate `@types/node`. `types: ["node"]` keeps the ambient global set explicit (only Node globals, not every installed `@types/*`). See `docs/decisions.md` "skipLibCheck + @types/node pinned to the runtime floor".
 
 ---
 

@@ -36,8 +36,8 @@
       ]
     }
   ],
-  "currentPhase": "implement",
-  "phaseStatus": "not_started",
+  "currentPhase": "engineering",
+  "phaseStatus": "complete_awaiting_approval",
   "paths": {
     "researchDir": "docs/research/",
     "brainstormDir": "docs/brainstorm/",
@@ -48,8 +48,6 @@
   },
   "history": [
     { "phase": "research", "completedAt": "2026-06-27T00:00:00Z", "approvedAt": "2026-06-27T00:00:00Z", "note": "Backfilled on 0.4.0→0.5.0 migration; satisfied by pre-existing docs/research/ subsystem map" },
-    { "phase": "brainstorm", "completedAt": "2026-06-27T00:00:00Z", "approvedAt": "2026-06-27T00:00:00Z" },
-    { "phase": "engineering", "completedAt": "2026-06-27T12:01:18Z", "approvedAt": "2026-06-27T12:01:18Z" },
-    { "phase": "plan", "completedAt": "2026-06-27T13:17:12Z", "approvedAt": "2026-06-27T13:17:12Z" }
+    { "phase": "brainstorm", "completedAt": "2026-06-27T14:41:58Z", "approvedAt": "2026-06-27T14:41:58Z", "note": "Opus refine pass (rewound from implement; git preserved via tag sonnet-run-checkpoint). Reconciled brainstorm with locked decisions, closed gaps, success criteria 14→18. Approved after orchestrator self-review; 3 flags handed to the engineering refine (malformed-JSON parse error, logger LogEntry scope, maxTokens default + criteria 15-18 coverage)." }
   ]
 }
