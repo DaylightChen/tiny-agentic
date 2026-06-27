@@ -64,4 +64,4 @@
 - **Deviations from plan:**
   1. Added `"pnpm": { "onlyBuiltDependencies": ["esbuild"] }` to root `package.json` — required so esbuild's native binary installs under pnpm 10's default postinstall-script blocking (reviewer-approved as correct & minimal).
   2. Added `passWithNoTests: true` to `packages/core/vitest.config.ts` — reviewer-endorsed follow-up so `pnpm -r test` is green before the first tests land in task 03.
-- **Commit:** _(filled after commit lands)_
+- **Commit:** `575b2e7` — "Task 01: scaffold pnpm monorepo (core/sdk/ui packages, build/lint/test tooling)"

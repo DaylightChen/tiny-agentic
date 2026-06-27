@@ -15,16 +15,17 @@ project
 - `brainstorm` phase approved (2026-06-27). Spec: `docs/brainstorm/2026-06-26-tiny-agentic-design.md`
 - `engineering` phase approved (2026-06-27): `docs/engineering/2026-06-27-engineering-spec.md` (canonical), plus `2026-06-27-code-architecture.md` (TS skeletons) and `2026-06-27-architecture-exploration.md` (rejected designs). Six engineering decisions appended to `docs/decisions.md`.
 - `plan` phase approved (2026-06-27): `docs/plan/implementation-plan.md` plus 10 self-contained task briefs under `docs/tasks/task-NN-*/brief.md`. Two max-effort self-reviews applied corrections (tsup entry stubs, examples workspace wiring, model id, sdk/ui typecheck, 6.16/7.13/7.14 coverage).
+- `task-01-repo-scaffold` complete (`575b2e7`): pnpm monorepo scaffolded — core/sdk/ui packages, examples workspace, shared tsconfig, boundary ESLint, tsup/Vitest. 1 dev-loop iteration, reviewer-approved.
 
 ## What's Next
-- Run `/phased-dev:start-task 01` to begin the per-task dev loop (implement → test → review → fix) on the first task. Tasks execute strictly in order.
+- Run `/phased-dev:start-task 02` to implement the core shared types (`messages`, `platform`, `tool` + `defineTool`, `provider`, `events`). Tasks execute strictly in order.
 
 ## Task Progress
 
 | # | Task | Status |
 |---|------|--------|
-| 01 | task-01-repo-scaffold | pending |
-| 02 | task-02-core-types | pending |
+| 01 | task-01-repo-scaffold | done (`575b2e7`) |
+| 02 | task-02-core-types | in progress |
 | 03 | task-03-platform-node | pending |
 | 04 | task-04-tool-registry-and-env-context | pending |
 | 05 | task-05-anthropic-mapper | pending |
