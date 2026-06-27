@@ -1,0 +1,54 @@
+{
+  "schemaVersion": 1,
+  "id": "project",
+  "type": "project",
+  "name": null,
+  "pipeline": [
+    {
+      "phase": "research",
+      "agent": "researcher",
+      "outputCheck": "docs/research/*.md"
+    },
+    {
+      "phase": "brainstorm",
+      "agent": "brainstormer",
+      "outputCheck": "docs/brainstorm/*.md"
+    },
+    {
+      "phase": "engineering",
+      "agent": "architect",
+      "outputCheck": "docs/engineering/*.md"
+    },
+    {
+      "phase": "plan",
+      "agent": "planner",
+      "outputCheck": [
+        "docs/plan/implementation-plan.md",
+        "docs/tasks/task-*/brief.md"
+      ]
+    },
+    {
+      "phase": "implement",
+      "agent": null,
+      "outputCheck": [
+        "docs/tasks/task-*/brief.md",
+        "docs/tasks/task-*/completion.md"
+      ]
+    }
+  ],
+  "currentPhase": "plan",
+  "phaseStatus": "not_started",
+  "paths": {
+    "researchDir": "docs/research/",
+    "brainstormDir": "docs/brainstorm/",
+    "engineeringDir": "docs/engineering/",
+    "plan": "docs/plan/implementation-plan.md",
+    "tasks": "docs/tasks/",
+    "decisions": "docs/decisions.md"
+  },
+  "history": [
+    { "phase": "research", "completedAt": "2026-06-27T00:00:00Z", "approvedAt": "2026-06-27T00:00:00Z", "note": "Backfilled on 0.4.0→0.5.0 migration; satisfied by pre-existing docs/research/ subsystem map" },
+    { "phase": "brainstorm", "completedAt": "2026-06-27T00:00:00Z", "approvedAt": "2026-06-27T00:00:00Z" },
+    { "phase": "engineering", "completedAt": "2026-06-27T12:01:18Z", "approvedAt": "2026-06-27T12:01:18Z" }
+  ]
+}
