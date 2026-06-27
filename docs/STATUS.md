@@ -8,15 +8,16 @@
 project
 
 ## Current Phase
-**plan** (not started)
+**plan** (complete — awaiting approval)
 
 ## Last Completed
 - `research` phase satisfied (2026-06-27, backfilled on the 0.4.0→0.5.0 plugin migration). Output: the pre-existing `docs/research/` subsystem map of the Claude Code reference (`docs/research/00-overview.md` … `06-ui-tui-layer.md`).
 - `brainstorm` phase approved (2026-06-27). Spec: `docs/brainstorm/2026-06-26-tiny-agentic-design.md`
 - `engineering` phase approved (2026-06-27): `docs/engineering/2026-06-27-engineering-spec.md` (canonical), plus `2026-06-27-code-architecture.md` (TS skeletons) and `2026-06-27-architecture-exploration.md` (rejected designs). Six engineering decisions appended to `docs/decisions.md`.
+- `plan` phase produced (awaiting approval): `docs/plan/implementation-plan.md` plus 10 self-contained task briefs under `docs/tasks/task-NN-*/brief.md`.
 
 ## What's Next
-- Run `/phased-dev:start-phase` to dispatch the `planner`, which breaks the engineering spec into a sequential task list (`docs/plan/implementation-plan.md`) with a self-contained `brief.md` per task under `docs/tasks/`.
+- Review the plan and task briefs, then run `/phased-dev:advance-phase` to move to the `implement` phase. From there, run `/phased-dev:start-task 01` to begin the per-task dev loop.
 
 ## Task Progress
 _(appears after the `plan` phase produces task briefs)_

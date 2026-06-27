@@ -37,7 +37,7 @@
     }
   ],
   "currentPhase": "plan",
-  "phaseStatus": "not_started",
+  "phaseStatus": "complete_awaiting_approval",
   "paths": {
     "researchDir": "docs/research/",
     "brainstormDir": "docs/brainstorm/",

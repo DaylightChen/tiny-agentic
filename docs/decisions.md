@@ -257,4 +257,52 @@ Dependency direction is strictly one-way: UI → SDK → core. Lower layers neve
 
 ---
 
+---
+
+## 2026-06-27 — Anthropic mapper is its own task (task-05), separate from the provider (task-06)
+
+**Phase:** plan
+
+**Decision:** `anthropic-mapper.ts` is implemented and fully tested before `anthropic.ts` is written. The mapper has its own task (task-05) with a dedicated test file (`anthropic-mapper.test.ts`).
+
+**Rationale:** The mapper is the highest-risk module in M1 — it implements a stateful per-block JSON accumulation state machine against the Anthropic SDK's exact streaming event shapes. Any surprise about those event shapes (SDK version differences, undocumented behavior) needs to surface in an isolated context before the provider depends on it. Testing the mapper in isolation (with fixture event sequences) is far more precise than testing it through a live provider mock.
+
+**Consequences:** The task ordering is: types → platform utilities → tool registry + env context → mapper → provider → loop → agent. This adds one extra task boundary but eliminates the risk of discovering mapper issues while debugging a full provider integration.
+
+---
+
+## 2026-06-27 — retry.ts is a tested utility but not wired into AnthropicProvider in M1
+
+**Phase:** plan
+
+**Decision:** `withRetry` is implemented (task-06) and unit-tested with fake timers / zero-delay options, but `AnthropicProvider.stream()` does NOT call it. The Anthropic SDK's `maxRetries` handles all retry logic for M1.
+
+**Rationale:** Per the engineering spec §5.3 and the "Provider contract owns retry" decisions log entry: wrapping stream construction in `withRetry` is a no-op because 429/5xx errors surface during stream iteration, not construction. The SDK's built-in retry covers both. `withRetry` exists as a documented fallback for future providers without built-in retry.
+
+**Consequences:** Any implementer who reads the code and wonders "why is withRetry never called?" should be directed here and to the engineering spec §5.3.
+
+---
+
+## 2026-06-27 — Built-in tools (readFileTool, writeFileTool) placed in task-08 with the Agent
+
+**Phase:** plan
+
+**Decision:** The two built-in tools are implemented in task-08 (the same task as the Agent class and the complete index.ts), not in a dedicated earlier task.
+
+**Rationale:** The built-in tools are two-line wrappers over `defineTool` + `Platform` calls. They add no significant complexity to task-08 and their wiring is naturally tested by the integration example (task-10). Putting them in their own task would create an artificially small task with minimal value.
+
+**Consequences:** Any implementer of task-08 should implement readFileTool and writeFileTool first (they are the simplest thing in the task) before tackling Agent.
+
+---
+
+## 2026-06-27 — Lint boundary verification is a dedicated task (task-09)
+
+**Phase:** plan
+
+**Decision:** ESLint boundary checks and typecheck across all packages are their own task (task-09), not folded into task-01 (which creates the config) or task-08 (the last production code task).
+
+**Rationale:** The boundary rules (`no-restricted-imports`, `no-restricted-globals`) are only meaningful against a complete import graph. Running them on a partial codebase (tasks 01–07) would either pass trivially (no imports yet) or require premature fixes to stubs. Running them at the end of all production code work (after task-08) ensures the check is complete and actionable.
+
+**Consequences:** Task-09 may require fixes to production code from tasks 02–08. Those fixes are small (e.g., removing an accidental `process.cwd()` call outside platform/node.ts) and are expected to be caught here rather than in task-10.
+
 _See `docs/research/` for the subsystem analysis underpinning these decisions._
