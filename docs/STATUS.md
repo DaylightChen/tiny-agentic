@@ -8,27 +8,31 @@
 project
 
 ## Current Phase
-**plan** (complete — awaiting approval)
+**implement** (not started)
 
 ## Last Completed
 - `research` phase satisfied (2026-06-27, backfilled on the 0.4.0→0.5.0 plugin migration). Output: the pre-existing `docs/research/` subsystem map of the Claude Code reference (`docs/research/00-overview.md` … `06-ui-tui-layer.md`).
 - `brainstorm` phase approved (2026-06-27). Spec: `docs/brainstorm/2026-06-26-tiny-agentic-design.md`
 - `engineering` phase approved (2026-06-27): `docs/engineering/2026-06-27-engineering-spec.md` (canonical), plus `2026-06-27-code-architecture.md` (TS skeletons) and `2026-06-27-architecture-exploration.md` (rejected designs). Six engineering decisions appended to `docs/decisions.md`.
-- `plan` phase produced (awaiting approval): `docs/plan/implementation-plan.md` plus 10 self-contained task briefs under `docs/tasks/task-NN-*/brief.md`.
+- `plan` phase approved (2026-06-27): `docs/plan/implementation-plan.md` plus 10 self-contained task briefs under `docs/tasks/task-NN-*/brief.md`. Two max-effort self-reviews applied corrections (tsup entry stubs, examples workspace wiring, model id, sdk/ui typecheck, 6.16/7.13/7.14 coverage).
 
 ## What's Next
-- Review the plan and task briefs, then run `/phased-dev:advance-phase` to move to the `implement` phase. From there, run `/phased-dev:start-task 01` to begin the per-task dev loop.
+- Run `/phased-dev:start-task 01` to begin the per-task dev loop (implement → test → review → fix) on the first task. Tasks execute strictly in order.
 
 ## Task Progress
-_(appears after the `plan` phase produces task briefs)_
 
-<!-- Example:
 | # | Task | Status |
 |---|------|--------|
-| 01 | task-name | done (`abc1234`) |
-| 02 | task-name | in progress |
-| 03 | task-name | pending |
--->
+| 01 | task-01-repo-scaffold | pending |
+| 02 | task-02-core-types | pending |
+| 03 | task-03-platform-node | pending |
+| 04 | task-04-tool-registry-and-env-context | pending |
+| 05 | task-05-anthropic-mapper | pending |
+| 06 | task-06-anthropic-provider-and-retry | pending |
+| 07 | task-07-loop-runtools | pending |
+| 08 | task-08-agent-and-index | pending |
+| 09 | task-09-lint-and-boundary-verification | pending |
+| 10 | task-10-integration-example | pending |
 
 ## Blockers
 None

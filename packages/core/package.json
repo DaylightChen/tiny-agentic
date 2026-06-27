@@ -1,0 +1,48 @@
+{
+  "name": "tiny-agentic",
+  "version": "0.1.0",
+  "description": "Headless agentic engine: agent loop, tools, provider abstraction, typed event stream.",
+  "type": "module",
+  "license": "MIT",
+  "engines": { "node": ">=18.0.0" },
+  "exports": {
+    ".": {
+      "import": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+    },
+    "./providers/anthropic": {
+      "import": "./dist/providers/anthropic.js",
+      "types": "./dist/providers/anthropic.d.ts"
+    },
+    "./platform/node": {
+      "import": "./dist/platform/node.js",
+      "types": "./dist/platform/node.d.ts"
+    },
+    "./utils": {
+      "import": "./dist/utils/collect.js",
+      "types": "./dist/utils/collect.d.ts"
+    }
+  },
+  "scripts": {
+    "build":     "tsup",
+    "typecheck": "tsc --noEmit",
+    "test":      "vitest run",
+    "test:watch":"vitest"
+  },
+  "dependencies": {
+    "zod-to-json-schema": "^3.23.0"
+  },
+  "peerDependencies": {
+    "zod": "^3.22.0",
+    "@anthropic-ai/sdk": "^0.52.0"
+  },
+  "peerDependenciesMeta": {
+    "@anthropic-ai/sdk": { "optional": true }
+  },
+  "devDependencies": {
+    "@anthropic-ai/sdk": "^0.52.0",
+    "typescript": "^5.7.0",
+    "tsup": "^8.0.0",
+    "vitest": "^3.0.0"
+  }
+}

@@ -9,3 +9,17 @@
 
 # Built Visual Studio Code Extensions
 *.vsix
+
+# Node dependencies
+node_modules/
+
+# Build output
+dist/
+*.tsbuildinfo
+
+# Test / coverage artifacts
+coverage/
+
+# OS / logs
+.DS_Store
+*.log

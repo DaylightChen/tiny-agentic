@@ -1,0 +1,7 @@
+{
+  "name": "tiny-agentic-examples",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "dependencies": { "tiny-agentic": "workspace:*" }
+}

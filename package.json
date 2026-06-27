@@ -1,0 +1,21 @@
+{
+  "name": "tiny-agentic-repo",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build":     "pnpm -r build",
+    "test":      "pnpm -r test",
+    "lint":      "eslint packages/*/src --max-warnings 0",
+    "typecheck": "pnpm -r typecheck"
+  },
+  "devDependencies": {
+    "typescript": "^5.7.0",
+    "typescript-eslint": "^8.0.0",
+    "@typescript-eslint/eslint-plugin": "^8.0.0",
+    "@typescript-eslint/parser": "^8.0.0",
+    "eslint": "^9.0.0"
+  },
+  "pnpm": {
+    "onlyBuiltDependencies": ["esbuild"]
+  }
+}
