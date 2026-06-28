@@ -58,7 +58,7 @@ export type ExecResult = {
 };
 
 export interface Platform {
-  /** Return the current working directory. The only place process.cwd() is called is NodePlatform. */
+  /** Return the current working directory. Node's working-directory global is read only inside NodePlatform. */
   cwd(): string;
   readFile(path: string, encoding?: "utf-8"): Promise<string>;
   writeFile(path: string, content: string): Promise<void>;
@@ -1253,6 +1253,19 @@ import tseslint from "typescript-eslint";
 export default tseslint.config(
   { ignores: ["**/dist/**", "**/*.config.ts", "**/*.config.js"] },
   ...tseslint.configs.recommended,
+  // Allow intentionally-unused identifiers prefixed with `_` (the skeletons use this
+  // convention for required-but-unused params: `_ctx` in Tool.call, `_req`/`_signal`
+  // in mock providers). Without it, @typescript-eslint/no-unused-vars errors on them.
+  {
+    files: ["**/*.ts"],
+    rules: {
+      "@typescript-eslint/no-unused-vars": ["error", {
+        argsIgnorePattern: "^_",
+        varsIgnorePattern: "^_",
+        caughtErrorsIgnorePattern: "^_",
+      }],
+    },
+  },
   // Core package: no UI deps, no Node built-ins / `process` outside platform/node.ts.
   {
     files: ["packages/core/src/**/*.ts"],

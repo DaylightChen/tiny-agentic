@@ -11,7 +11,7 @@ export type ExecResult = {
 };
 
 export interface Platform {
-  /** Return the current working directory. The only place process.cwd() is called is NodePlatform. */
+  /** Return the current working directory. Node's working-directory global is read only inside NodePlatform. */
   cwd(): string;
   readFile(path: string, encoding?: "utf-8"): Promise<string>;
   writeFile(path: string, content: string): Promise<void>;

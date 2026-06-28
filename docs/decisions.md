@@ -369,3 +369,15 @@ An empty-object `input` plus a boolean flag keeps the persisted history valid on
 ---
 
 _See `docs/research/` for the subsystem analysis underpinning these decisions._
+
+---
+
+## 2026-06-28 — ESLint ignores `_`-prefixed unused identifiers
+
+**Phase:** implement (task-03, Opus redo)
+
+**Decision:** `eslint.config.js` configures `@typescript-eslint/no-unused-vars` with `argsIgnorePattern`/`varsIgnorePattern`/`caughtErrorsIgnorePattern: "^_"`.
+
+**Rationale:** The code-architecture skeletons pervasively use leading-underscore names for required-but-unused identifiers — `_ctx` in a `Tool.call` that needs no context, `_req`/`_signal` in `MockProvider.stream`, `_encoding` on `NodePlatform.readFile`. `typescript-eslint`'s recommended `no-unused-vars` has no underscore exception by default, so each such param errored. Adding the ignore patterns once (the conventional setting) is cleaner than dropping/renaming params task-by-task, and preserves call-site self-documentation. Surfaced when task-03's `_encoding` failed lint.
+
+**Consequences:** Tasks 05/07/08 (mock providers, tool calls with unused context) lint cleanly with their `_`-prefixed params. The code-architecture doc's ESLint snippet was updated to match.
