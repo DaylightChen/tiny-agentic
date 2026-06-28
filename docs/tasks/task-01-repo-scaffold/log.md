@@ -33,7 +33,7 @@
 - **Acceptance criteria:** all 16 verified by the tester under Node 22 (install/typecheck/lint/build/test exit 0; Node-22 floor; skipLibCheck+types:[node]; @types/node ^22; workspace deps; entry stubs; `.npmrc`).
 - **Deviations from brief (reviewer-approved):** (1) added `@types/node@^22` + `typescript@^5.7.0` to `packages/sdk` and `packages/ui` devDependencies — required because the base tsconfig's `types:["node"]` makes every extending package need `@types/node` (else TS2688); the brief's `package.json` blocks omitted them. (2) Removed prior-run task-02 leftovers (`src/types/*.ts`, `src/__tests__/types.test.ts`) and reverted `index.ts` to the stub — task-01 scope is scaffold-only; task-02 recreates them.
 - **Regressions:** none.
-- **Commit:** _(filled after commit lands)_
+- **Commit:** `8446076` — "Task 01 (Opus redo): scaffold on Node 22 + skipLibCheck/@types/node"
 
 ---
 
