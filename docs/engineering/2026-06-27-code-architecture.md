@@ -789,24 +789,27 @@ export class InputAccumulator {
   }
 
   /** Called for each input_json_delta on a block. */
-  appendDelta(index: number, partialJson: string): void {
+  appendJson(index: number, partialJson: string): void {
     const block = this.blocks.get(index);
     if (block) block.json += partialJson;
   }
 
   /**
-   * Called at content_block_stop. Returns a discriminated result: "ok" with the
-   * parsed input, or "parse_error" when the accumulated JSON is unparseable.
-   * The caller (translateStreamEvent) maps "parse_error" to a tool_use event with
-   * `input: {}` and `inputParseError: true` — the boolean flag, not a value in
-   * `input`, carries the signal, so runTools can tell a genuine parse failure
-   * apart from a tool that legitimately takes `{}`/null while keeping `input`
-   * JSON-serializable.
+   * Called at content_block_stop. Returns a discriminated result, or `null` for a
+   * non-tracked block (a text block's content_block_stop — text blocks are never
+   * startBlock'd). "ok" carries the parsed input; "parse_error" signals unparseable
+   * JSON. The caller (translateStreamEvent) maps "parse_error" to a tool_use event
+   * with `input: {}` and `inputParseError: true` — the boolean flag, not a value in
+   * `input`, carries the signal, so runTools can tell a genuine parse failure apart
+   * from a tool that legitimately takes `{}` while keeping `input` JSON-serializable.
    * An empty buffer is treated as `{}` (Anthropic emits no deltas for a no-arg call).
+   * (Returning `null` for non-tracked blocks — rather than a `parse_error` with an
+   * empty id — is the refined design: it keeps "not a tool block" a distinct, typed
+   * case instead of an empty-string-id sentinel. Matches the task-05 brief.)
    */
-  finishBlock(index: number): FinishResult {
+  finishBlock(index: number): FinishResult | null {
     const block = this.blocks.get(index);
-    if (!block) return { kind: "parse_error", id: "", name: "" };
+    if (!block) return null; // text / non-tracked block
     this.blocks.delete(index);
     const raw = block.json.trim();
     try {
@@ -820,51 +823,69 @@ export class InputAccumulator {
 
 /**
  * Translate one Anthropic stream event into zero or more ProviderEvents,
- * threading per-block state through the accumulator.
+ * threading per-block state through the accumulator. The parameter is typed
+ * `unknown` (not an SDK event type) so the mapper's public contract stays stable
+ * against @anthropic-ai/sdk type churn — events are narrowed internally via small
+ * type guards. Returns an array (a plain function, not a generator). This is the
+ * authoritative form per the task-05 brief's Downstream-dependencies contract.
  */
-export function* translateStreamEvent(
-  event: Anthropic.MessageStreamEvent,
+export function translateStreamEvent(
+  event: unknown,
   acc: InputAccumulator,
-): Generator<ProviderEvent> {
-  switch (event.type) {
-    case "content_block_start":
-      if (event.content_block.type === "tool_use") {
-        acc.startBlock(event.index, event.content_block.id, event.content_block.name);
+): ProviderEvent[] {
+  if (!isRecord(event)) return [];
+  switch (event["type"]) {
+    case "content_block_start": {
+      const cb = event["content_block"];
+      if (isRecord(cb) && cb["type"] === "tool_use") {
+        acc.startBlock(asNumber(event["index"]), asString(cb["id"]), asString(cb["name"]));
       }
-      return;
-    case "content_block_delta":
-      if (event.delta.type === "text_delta") {
-        yield { type: "text_delta", text: event.delta.text };
-      } else if (event.delta.type === "input_json_delta") {
-        acc.appendDelta(event.index, event.delta.partial_json);
-      }
-      return;
-    case "content_block_stop": {
-      const finish = acc.finishBlock(event.index);
-      if (!finish.id) return; // not a tool_use block (text block stop)
-      if (finish.kind === "ok") {
-        yield { type: "tool_use", id: finish.id, name: finish.name, input: finish.input };
-      } else {
-        // parse_error → placeholder {} input + inputParseError flag; runTools emits
-        // the dedicated §6.1 message. `input` stays JSON-serializable for history.
-        yield { type: "tool_use", id: finish.id, name: finish.name, input: {}, inputParseError: true };
-      }
-      return;
+      return [];
     }
-    case "message_delta":
+    case "content_block_delta": {
+      const delta = event["delta"];
+      if (isRecord(delta) && delta["type"] === "text_delta") {
+        return [{ type: "text_delta", text: asString(delta["text"]) }];
+      }
+      if (isRecord(delta) && delta["type"] === "input_json_delta") {
+        acc.appendJson(asNumber(event["index"]), asString(delta["partial_json"]));
+      }
+      return [];
+    }
+    case "content_block_stop": {
+      const finish = acc.finishBlock(asNumber(event["index"]));
+      if (finish === null) return []; // text / non-tracked block
+      if (finish.kind === "ok") {
+        return [{ type: "tool_use", id: finish.id, name: finish.name, input: finish.input }];
+      }
+      // parse_error → placeholder {} input + inputParseError flag; runTools emits the
+      // dedicated §6.1 message. `input` stays JSON-serializable for history threading.
+      return [{ type: "tool_use", id: finish.id, name: finish.name, input: {}, inputParseError: true }];
+    }
+    case "message_delta": {
       // stop_reason lives on the message_delta; cache it for message_stop below.
-      if (event.delta?.stop_reason) acc.setStopReason(event.delta.stop_reason);
-      return;
+      const delta = event["delta"];
+      if (isRecord(delta) && typeof delta["stop_reason"] === "string") {
+        acc.setStopReason(delta["stop_reason"]);
+      }
+      return [];
+    }
     case "message_stop":
-      yield { type: "message_stop", stopReason: acc.takeStopReason() };
-      return;
+      return [{ type: "message_stop", stopReason: acc.takeStopReason() }];
     default:
-      return; // message_start, ping, etc. — ignored in M1
+      return []; // message_start, ping, etc. — ignored in M1
   }
 }
+
+// Minimal local guards (the param is `unknown` to decouple from SDK types).
+function isRecord(v: unknown): v is Record<string, unknown> {
+  return typeof v === "object" && v !== null;
+}
+function asString(v: unknown): string { return typeof v === "string" ? v : ""; }
+function asNumber(v: unknown): number { return typeof v === "number" ? v : -1; }
 ```
 
-> Note: `content_block_stop` does not carry the block type, so `finishBlock` returns an empty `id` for non-tool (text) blocks — the caller skips emitting a `tool_use` for those. The real `stop_reason` is cached on the `InputAccumulator` from `message_delta` (`setStopReason`) and emitted on the `message_stop` ProviderEvent (`takeStopReason`, defaulting to `"end_turn"` if no delta carried one). This stateful per-block accumulation is the highest-risk module in M1 and has its own task + test file (`anthropic-mapper.test.ts`); see `docs/decisions.md` "Anthropic mapper is its own task".
+> Note: `content_block_stop` does not carry the block type, so `finishBlock` returns `null` for a non-tracked (text) block — the caller skips emitting a `tool_use` for those. (An earlier draft returned a `parse_error` with an empty `id` and checked `!finish.id`; the `null` form is cleaner and is the canonical design — see the task-05 brief.) The real `stop_reason` is cached on the `InputAccumulator` from `message_delta` (`setStopReason`) and emitted on the `message_stop` ProviderEvent (`takeStopReason`, defaulting to `"end_turn"`). This stateful per-block accumulation is the highest-risk module in M1 and has its own task + test file (`anthropic-mapper.test.ts`); see `docs/decisions.md` "Anthropic mapper is its own task".
 
 ---
 
