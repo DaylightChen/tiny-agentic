@@ -21,5 +21,16 @@
 ### Orchestrator config fix (argsIgnorePattern)
 - Applied the implementer+tester-concurred fix: added `@typescript-eslint/no-unused-vars` with `argsIgnorePattern`/`varsIgnorePattern`/`caughtErrorsIgnorePattern: "^_"` to `eslint.config.js`. Synced the code-architecture doc's ESLint snippet and added a `docs/decisions.md` entry. Re-verified: lint→0, test 15/15, typecheck→0. (`_encoding` left dropped in node.ts — cleaner; the fix is for later tasks' `_req`/`_signal`/`_ctx`.)
 
-### Review
-- _(reviewer report appended here)_
+### Review (Opus)
+- **Verdict:** Approved — no blocking/non-blocking issues (one optional grep-comment note, fixed by orchestrator).
+- **Boundary intact:** `node:` built-ins + `process` only in `platform/node.ts`; the ESLint `argsIgnorePattern:"^_"` block touches only `no-unused-vars`, does NOT relax `no-restricted-imports`/`no-restricted-globals`. Lint clean.
+- **Fidelity:** `exec` conditional-spread and `_encoding` drop are correct/brief-mandated deviations (not drift); serialize/collect verbatim.
+- **Test quality:** strong — serialize-throws (BigInt + nested + circular) asserts a throw (load-bearing for task-07 loop); collect tests exceed the brief (mixed-event filter, zero-event, terminal identity + payload).
+- **Forward-compat:** stable for task-04 (Platform), task-07 (serializeToolResult throw + collect), task-10 (NodePlatform).
+- **Orchestrator follow-up:** reworded `types/platform.ts` + code-arch `Platform.cwd` JSDoc to drop the literal `process.cwd()` so task-09's `grep "process\."` boundary check returns empty (verified clean).
+
+## Completion
+- **Iterations:** 1 (implement → test → review, all green).
+- **Verification (orchestrator, Node v22.22.0):** test 15/15; typecheck→0; lint→0; build→0 (4 entries). `process.` grep outside platform/node → clean.
+- **Acceptance criteria:** all met. **Regressions:** none.
+- **Commit:** `6cf6a1a` — "Task 03 (Opus redo): NodePlatform + serializeToolResult + collect utils"
