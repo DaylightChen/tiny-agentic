@@ -8,26 +8,25 @@
 project
 
 ## Current Phase
-**engineering** (in progress — Opus refine pass)
+**implement** (not started — Opus redo)
 
-> **Refine pass (2026-06-27):** the scope was rewound from `implement` to `brainstorm` to re-run brainstorm → engineering → plan → implement with all phased-dev agents pinned to Opus. Git history is preserved (all prior commits intact; Sonnet implement work tagged `sonnet-run-checkpoint`). The task-progress table below reflects the prior Sonnet run and will be regenerated when the refined plan re-enters `implement`.
+> **Opus refine pass (2026-06-27 → 06-28):** the scope was rewound from `implement` to `brainstorm` and re-run through brainstorm → engineering → plan with all phased-dev agents pinned to Opus, each phase orchestrator-self-reviewed. Git history preserved (Sonnet implement work tagged `sonnet-run-checkpoint`). Now redoing `implement` tasks 01→10 with the Opus dev-loop against the refined briefs. The prior Sonnet task-01/02 completion marker + logs were removed for a clean redo.
 
 ## Last Completed
-- `research` phase satisfied (2026-06-27, backfilled on the 0.4.0→0.5.0 plugin migration). Output: the pre-existing `docs/research/` subsystem map of the Claude Code reference (`docs/research/00-overview.md` … `06-ui-tui-layer.md`).
-- `brainstorm` phase approved (2026-06-27). Spec: `docs/brainstorm/2026-06-26-tiny-agentic-design.md`
-- `engineering` phase approved (2026-06-27): `docs/engineering/2026-06-27-engineering-spec.md` (canonical), plus `2026-06-27-code-architecture.md` (TS skeletons) and `2026-06-27-architecture-exploration.md` (rejected designs). Six engineering decisions appended to `docs/decisions.md`.
-- `plan` phase approved (2026-06-27): `docs/plan/implementation-plan.md` plus 10 self-contained task briefs under `docs/tasks/task-NN-*/brief.md`. Two max-effort self-reviews applied corrections (tsup entry stubs, examples workspace wiring, model id, sdk/ui typecheck, 6.16/7.13/7.14 coverage).
-- `task-01-repo-scaffold` complete (`575b2e7`): pnpm monorepo scaffolded — core/sdk/ui packages, examples workspace, shared tsconfig, boundary ESLint, tsup/Vitest. 1 dev-loop iteration, reviewer-approved.
+- `research` satisfied (2026-06-27, backfilled). Output: `docs/research/` subsystem map.
+- `brainstorm` approved (Opus refine, 2026-06-27): `docs/brainstorm/2026-06-26-tiny-agentic-design.md` (reconciled with locked decisions; success criteria 14→18).
+- `engineering` approved (Opus refine, commit `27f095c`): `docs/engineering/*` — skipLibCheck/@types/node/Node-22 resolved, `inputParseError` malformed-JSON design, maxTokens 32000, criteria 7.15–7.18, stop_reason caching. 4 new decisions in `docs/decisions.md`.
+- `plan` approved (Opus refine, commit `80de5e0`): `docs/plan/implementation-plan.md` + 10 refined briefs.
 
 ## What's Next
-- Opus `brainstormer` refines the product design spec → user approves → advance to `engineering` (Opus `architect`, also resolving the `@types/node`/`skipLibCheck` decision) → `plan` (Opus `planner`) → redo `implement` tasks.
+- Run the Opus dev-loop on **task 01** (refined scaffold: Node 22, `@types/node`, `skipLibCheck`), then proceed 02→10 in order.
 
 ## Task Progress
 
 | # | Task | Status |
 |---|------|--------|
-| 01 | task-01-repo-scaffold | done (`575b2e7`) |
-| 02 | task-02-core-types | in progress |
+| 01 | task-01-repo-scaffold | in progress |
+| 02 | task-02-core-types | pending |
 | 03 | task-03-platform-node | pending |
 | 04 | task-04-tool-registry-and-env-context | pending |
 | 05 | task-05-anthropic-mapper | pending |

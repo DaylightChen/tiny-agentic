@@ -36,8 +36,8 @@
       ]
     }
   ],
-  "currentPhase": "engineering",
-  "phaseStatus": "complete_awaiting_approval",
+  "currentPhase": "implement",
+  "phaseStatus": "not_started",
   "paths": {
     "researchDir": "docs/research/",
     "brainstormDir": "docs/brainstorm/",
@@ -48,6 +48,8 @@
   },
   "history": [
     { "phase": "research", "completedAt": "2026-06-27T00:00:00Z", "approvedAt": "2026-06-27T00:00:00Z", "note": "Backfilled on 0.4.0→0.5.0 migration; satisfied by pre-existing docs/research/ subsystem map" },
-    { "phase": "brainstorm", "completedAt": "2026-06-27T14:41:58Z", "approvedAt": "2026-06-27T14:41:58Z", "note": "Opus refine pass (rewound from implement; git preserved via tag sonnet-run-checkpoint). Reconciled brainstorm with locked decisions, closed gaps, success criteria 14→18. Approved after orchestrator self-review; 3 flags handed to the engineering refine (malformed-JSON parse error, logger LogEntry scope, maxTokens default + criteria 15-18 coverage)." }
+    { "phase": "brainstorm", "completedAt": "2026-06-27T14:41:58Z", "approvedAt": "2026-06-27T14:41:58Z", "note": "Opus refine pass (rewound from implement; git preserved via tag sonnet-run-checkpoint). Reconciled brainstorm with locked decisions, closed gaps, success criteria 14→18. Approved after orchestrator self-review; 3 flags handed to the engineering refine (malformed-JSON parse error, logger LogEntry scope, maxTokens default + criteria 15-18 coverage)." },
+    { "phase": "engineering", "completedAt": "2026-06-27T15:06:38Z", "approvedAt": "2026-06-27T15:06:38Z", "note": "Opus refine pass (commit 27f095c). Resolved @types/node/skipLibCheck escalation (skipLibCheck:true, @types/node ^22, Node floor→22), malformed-JSON via inputParseError flag (replacing buggy PARSE_ERROR symbol), maxTokens default 32000, criteria 7.15-7.18, stop_reason caching. Two orchestrator self-reviews; 3 bugs (A/B/C) fixed before approval." },
+    { "phase": "plan", "completedAt": "2026-06-28T07:15:15Z", "approvedAt": "2026-06-28T07:15:15Z", "note": "Opus refine pass (commit 80de5e0). Planner did task-01 (Node 22/skipLibCheck) before a transient classifier 403; orchestrator completed tasks 02/04/05/06/07/08/10 + plan (inputParseError flag, criteria 7.15-7.18, maxTokens, 6.1 split) and self-reviewed. Stale Sonnet-run task-01 completion.md + logs removed for a clean Opus redo." }
   ]
 }
