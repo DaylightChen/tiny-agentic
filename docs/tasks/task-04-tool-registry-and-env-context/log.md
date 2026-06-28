@@ -26,4 +26,4 @@
 - **Iterations:** 1 (implement → test → review, all green).
 - **Verification (orchestrator, Node v22.22.0):** test 21/21; typecheck→0; lint→0; build→0.
 - **Acceptance criteria:** all met (registry findByName/toSchemas; buildEnvContext; 7.13 + 7.15). **Deviations:** none. **Regressions:** none.
-- **Commit:** _(filled after commit lands)_
+- **Commit:** `9ae75f7` — "Task 04 (Opus redo): ToolRegistry + buildEnvContext"
