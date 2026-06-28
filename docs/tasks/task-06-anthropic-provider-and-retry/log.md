@@ -28,4 +28,4 @@
 - **Iterations:** 1 (implement → test → review, all green).
 - **Verification (orchestrator, Node v22.22.0):** test 47/47; typecheck→0; lint→0; build→0.
 - **Acceptance criteria:** all met (constructor throw; maxTokens 32000; SDK-delegated retry; signal; 7.14 logger-off; retry behaviors). **Deviation:** conditional `logger` assign (exactOptionalPropertyTypes). **Regressions:** none.
-- **Commit:** _(filled after commit lands)_
+- **Commit:** `2a6f169` — "Task 06 (Opus redo): AnthropicProvider + withRetry"
