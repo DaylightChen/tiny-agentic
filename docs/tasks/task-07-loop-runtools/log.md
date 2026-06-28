@@ -28,4 +28,4 @@
 - **Iterations:** 1 (implement → test → review, all green).
 - **Verification (orchestrator, Node v22.22.0):** test 61/61; typecheck→0; lint→0.
 - **Acceptance criteria:** all met (7.2–7.6, 7.16, 7.18, 6.1 parseError, 6.16, LoopParams export, never-throws). **Deviation:** omitted unused `ToolUseBlock` import. **Regressions:** none.
-- **Commit:** _(filled after commit lands)_
+- **Commit:** `6918f03` — "Task 07 (Opus redo): agentLoop + runTools"

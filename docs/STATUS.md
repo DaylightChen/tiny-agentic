@@ -19,7 +19,7 @@ project
 - `plan` approved (Opus refine, commit `80de5e0`): `docs/plan/implementation-plan.md` + 10 refined briefs.
 
 ## What's Next
-- Opus dev-loop on **task 07** (agentLoop + runTools — parseError before Zod, tool-result bundling, 7.16 multi-tool + 7.18 streaming tests), then 08→10. Auto-proceeding, committing each task on green review.
+- Opus dev-loop on **task 08** (Agent class + run() w/ AbortController, readFile/writeFile builtins, public index.ts; agent.test.ts incl 7.1/7.9/7.13/7.17 + the deferred serialize-catch test), then 09→10. Auto-proceeding, committing each task on green review.
 
 ## Task Progress
 
@@ -31,8 +31,8 @@ project
 | 04 | task-04-tool-registry-and-env-context | done (`9ae75f7`) |
 | 05 | task-05-anthropic-mapper | done (`29326dd`) |
 | 06 | task-06-anthropic-provider-and-retry | done (`2a6f169`) |
-| 07 | task-07-loop-runtools | in progress |
-| 08 | task-08-agent-and-index | pending |
+| 07 | task-07-loop-runtools | done (`6918f03`) |
+| 08 | task-08-agent-and-index | in progress |
 | 09 | task-09-lint-and-boundary-verification | pending |
 | 10 | task-10-integration-example | pending |
 
