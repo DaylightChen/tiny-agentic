@@ -4,5 +4,6 @@
   "private": false,
   "type": "module",
   "scripts": { "typecheck": "tsc --noEmit" },
-  "dependencies": { "tiny-agentic-sdk": "workspace:*" }
+  "dependencies": { "tiny-agentic-sdk": "workspace:*" },
+  "devDependencies": { "@types/node": "^22.0.0", "typescript": "^5.7.0" }
 }

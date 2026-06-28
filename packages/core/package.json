@@ -5,7 +5,7 @@
   "type": "module",
   "license": "MIT",
   "engines": {
-    "node": ">=18.0.0"
+    "node": ">=22.0.0"
   },
   "exports": {
     ".": {
@@ -45,7 +45,7 @@
   },
   "devDependencies": {
     "@anthropic-ai/sdk": "^0.52.0",
-    "@types/node": "^18.0.0",
+    "@types/node": "^22.0.0",
     "tsup": "^8.0.0",
     "typescript": "^5.7.0",
     "vitest": "^3.0.0"
