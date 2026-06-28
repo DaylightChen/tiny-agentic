@@ -108,6 +108,7 @@ Implement the final production modules: `packages/core/src/agent.ts` (the `Agent
    - **Provider abstraction compile-check (success criterion 7.7):** MockProvider (typed as `Provider`) passed to `Agent` — this is a static check. Confirmed by `tsc --noEmit` passing.
    - **Platform abstraction compile-check (success criterion 7.8):** MockPlatform (typed as `Platform`) passed to `Agent` — static check. Confirmed by `tsc --noEmit` passing.
    - **Logger off by default (success criterion 7.14):** verified in task 06's `anthropic.test.ts` (mock-SDK test: no logger → zero console output when `stream()` runs). Do NOT re-test it here — `agent.test.ts` uses `MockProvider`, which has no logger hook, so it cannot exercise the provider's logger behavior. No action in this task beyond noting the coverage lives in task 06.
+   - **Abort on abandonment (success criterion 7.17, edge case 6.9):** a `MockProvider` whose `stream(req, signal)` captures the `signal`, yields one `text_delta`, then awaits the abort before returning (deterministic, no timer): `await new Promise<void>((res) => signal!.addEventListener("abort", () => res(), { once: true }))`. Drive `agent.run(...)` with `for await` and `break` immediately after the first event. After the loop, assert the captured `signal.aborted === true` — the agent's `finally { abortCtrl.abort() }` fired on the early break, cancelling the in-flight provider stream. (The mock resolves only once aborted, so the test neither hangs nor needs a real timer.)
 
 6. **Run `pnpm --filter tiny-agentic build`** — all four entry points build successfully. Verify `dist/` contains: `index.js`, `index.d.ts`, `providers/anthropic.js`, `providers/anthropic.d.ts`, `platform/node.js`, `platform/node.d.ts`, `utils/collect.js`, `utils/collect.d.ts`.
 
@@ -125,6 +126,7 @@ Implement the final production modules: `packages/core/src/agent.ts` (the `Agent
 - [ ] Success criterion 7.8 (platform abstraction compile-check) verified by typecheck passing.
 - [ ] Success criterion 7.9 (multi-turn threading) covered in `agent.test.ts`.
 - [ ] Success criterion 7.13 (env context injection) covered end-to-end in `agent.test.ts`: captured `request.systemPrompt` contains the env block and, when a custom `systemPrompt` is set, the custom text follows it.
+- [ ] Success criterion 7.17 (abort on abandonment) covered in `agent.test.ts`: the captured `AbortSignal` is `aborted` after the caller breaks the `for await` loop early.
 - [ ] `packages/core/src/index.ts` exports `Agent`, `defineTool`, `readFileTool`, `writeFileTool` as values; all type exports present.
 - [ ] Manually confirm: `readFileTool` and `writeFileTool` are typed such that `input` inside `call` is fully typed (not `unknown`) — a consequence of using `defineTool`.
 

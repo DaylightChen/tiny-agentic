@@ -15,7 +15,8 @@ This module is the highest-risk piece of the codebase: it depends on the exact s
 
 ## Context files
 
-- `docs/engineering/2026-06-27-engineering-spec.md` — §5.1 (request mapping), §5.2 (stream event translation), §6.1 (malformed JSON sentinel), §10.2 (multi-block accumulation test requirement)
+- `docs/engineering/2026-06-27-engineering-spec.md` — §5.1 (request mapping), §5.2 (stream event translation, incl. `stop_reason` caching), §6.1 (malformed JSON → `inputParseError` flag), §10.2 (multi-block accumulation test requirement)
+- `packages/core/src/types/provider.ts` — note `ProviderEvent`'s `tool_use` variant carries the optional `inputParseError?: boolean` (added in task-02 from the refined types)
 - `docs/engineering/2026-06-27-code-architecture.md` — `providers/anthropic.ts` skeleton (shows how mapRequest and translateStreamEvent are used)
 - `packages/core/src/types/provider.ts` — `ProviderRequest`, `ProviderEvent`, `ToolSchema`
 - `packages/core/src/types/messages.ts` — `Message` type (what mapMessages must accept)
@@ -87,15 +88,25 @@ This module is the highest-risk piece of the codebase: it depends on the exact s
        if (entry) entry.json += partialJson;
      }
 
-     finishBlock(index: number): { id: string; name: string; input: unknown } | null {
+     // Returns a discriminated result (or null for a non-tracked/text block).
+     // A parse failure is signalled DISTINCTLY via `kind: "parse_error"` — NOT a
+     // null/sentinel input — so the loop can emit the dedicated §6.1 message and so
+     // a serializable placeholder input can be threaded back into history. An empty
+     // buffer is treated as {} (Anthropic emits no input_json_delta for a no-arg call).
+     // See docs/decisions.md "malformed tool input via the inputParseError flag".
+     finishBlock(index: number):
+       | { kind: "ok"; id: string; name: string; input: unknown }
+       | { kind: "parse_error"; id: string; name: string }
+       | null {
        const entry = this.pending.get(index);
        if (!entry) return null;
        this.pending.delete(index);
+       const raw = entry.json.trim();
        try {
-         return { id: entry.id, name: entry.name, input: JSON.parse(entry.json) };
+         const input = raw === "" ? {} : JSON.parse(raw);
+         return { kind: "ok", id: entry.id, name: entry.name, input };
        } catch {
-         // Malformed JSON — return a sentinel input that Zod will reject (edge case 6.1)
-         return { id: entry.id, name: entry.name, input: null };
+         return { kind: "parse_error", id: entry.id, name: entry.name };
        }
      }
 
@@ -116,7 +127,7 @@ This module is the highest-risk piece of the codebase: it depends on the exact s
    - `content_block_start` where `content_block.type === "text"` → `[]`
    - `content_block_delta` where `delta.type === "text_delta"` → `[{ type: "text_delta", text: delta.text }]`
    - `content_block_delta` where `delta.type === "input_json_delta"` → `accumulator.appendJson(index, delta.partial_json)`; return `[]`
-   - `content_block_stop` → try `accumulator.finishBlock(index)`; if non-null, `[{ type: "tool_use", id, name, input }]`; else `[]`
+   - `content_block_stop` → `accumulator.finishBlock(index)`; if `null` (text/non-tracked block) → `[]`; if `{ kind: "ok", id, name, input }` → `[{ type: "tool_use", id, name, input }]`; if `{ kind: "parse_error", id, name }` → `[{ type: "tool_use", id, name, input: {}, inputParseError: true }]` (a serializable `{}` placeholder plus the `inputParseError` flag — NOT a `null` sentinel; `runTools` detects the flag **before** Zod and emits the §6.1 message)
    - `message_delta` → if `delta.stop_reason` is present, `accumulator.setStopReason(delta.stop_reason)`; return `[]` (the reason is surfaced on the following `message_stop`, not here)
    - `message_stop` → emit `[{ type: "message_stop", stopReason: accumulator.takeStopReason() }]` (`takeStopReason()` returns the cached reason, defaulting to `"end_turn"`). Verify against the actual SDK types that `stop_reason` arrives on `message_delta.delta.stop_reason`; if the SDK delivers it elsewhere, adapt the source of `setStopReason` and note the deviation in the completion doc.
    - Unknown event types → `[]`
@@ -127,7 +138,7 @@ This module is the highest-risk piece of the codebase: it depends on the exact s
    - Text streaming: simulate `content_block_start(text)` → multiple `content_block_delta(text_delta)` → `content_block_stop` → assert `ProviderEvent[]` contains `text_delta` events per delta and no `tool_use`.
    - Single tool use: simulate the full sequence above. Assert `ProviderEvent[]` from `content_block_stop` contains `{ type: "tool_use", id: "...", name: "...", input: { path: "x" } }`.
    - **Multi-block accumulation (engineering spec §10.2):** simulate two concurrent tool-use blocks (indices 1 and 2), interleaved `input_json_delta` events. Assert both `tool_use` events are emitted with correct inputs at their respective `content_block_stop`.
-   - **Malformed JSON (edge case 6.1):** simulate `input_json_delta` events that accumulate to `"{bad json"`. Assert the `tool_use` event has `input: null` (the sentinel). (The Zod parse step in runTools will then reject it with an error fed back to the model.)
+   - **Malformed JSON (edge case 6.1):** simulate `input_json_delta` events that accumulate to `"{bad json"`. Assert the emitted `tool_use` event has `inputParseError === true` and `input` deep-equals `{}` (the serializable placeholder — **not** `null`). (runTools detects the flag before Zod and emits `"Tool '<name>': could not parse tool input as JSON"`.) Also assert that `finishBlock` for that block returns `{ kind: "parse_error", ... }`.
    - `message_stop` produces `{ type: "message_stop", stopReason: "tool_use" }` after a `message_delta` with `stop_reason: "tool_use"`.
 
 4. **Run `pnpm --filter tiny-agentic test`** — all tests pass including mapper tests.
@@ -140,7 +151,7 @@ This module is the highest-risk piece of the codebase: it depends on the exact s
 - [ ] `pnpm --filter tiny-agentic typecheck` exits with code 0.
 - [ ] `mapRequest` test: given a `ProviderRequest` with one tool schema, the output has `tools[0].input_schema` (not `inputSchema`).
 - [ ] Multi-block accumulation test passes: two tool-use blocks with interleaved deltas both produce correct `tool_use` events.
-- [ ] Malformed JSON test passes: sentinel `input: null` is emitted (Zod will reject it downstream).
+- [ ] Malformed JSON test passes: the `tool_use` event carries `inputParseError: true` and `input` deep-equals `{}` (no `null` sentinel); `finishBlock` returns `{ kind: "parse_error" }`.
 - [ ] `packages/core/src/providers/anthropic-mapper.ts` exports `mapRequest`, `InputAccumulator`, `translateStreamEvent`.
 - [ ] No import of `@anthropic-ai/sdk` types inside the function bodies (type imports are fine; runtime imports from the SDK are for the provider, not the mapper — the mapper only accesses typed event objects passed in).
 

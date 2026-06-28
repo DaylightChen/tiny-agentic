@@ -30,7 +30,7 @@ None — this is the final task. The example is a throwaway driver, not depended
 
    **Prerequisite (already done in task 01):** `examples/` is a workspace package (`examples/package.json` with `"dependencies": { "tiny-agentic": "workspace:*" }`, and `examples` listed in `pnpm-workspace.yaml`). This is what makes the bare `import { ... } from "tiny-agentic"` specifiers below resolve — pnpm symlinks the core package into `examples/node_modules`. If for any reason that wiring is missing, fix it in task 01's outputs (do not work around it with deep `dist/` relative imports).
 
-1. **Add `tsx` as a root devDependency** (or use `--import tsx` with Node — check current Node 18 support for TypeScript execution). The recommended approach for running TypeScript scripts directly in a pnpm workspace:
+1. **Add `tsx` as a root devDependency** (or use `--import tsx` with Node — check current Node 22 support for TypeScript execution). The recommended approach for running TypeScript scripts directly in a pnpm workspace:
    - Add `"tsx": "^4.0.0"` to root `package.json` `devDependencies`.
    - Run `pnpm install` to resolve it.
    - Add a root script: `"example": "tsx examples/basic-run.ts"`.

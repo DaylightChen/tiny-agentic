@@ -137,7 +137,7 @@ The **loop control flow** (task 7) is the second-highest-risk piece: the interpl
 | §5.2 — Stream event translation (InputAccumulator, translateStreamEvent) | task-05 | |
 | §5.3 — Retry model (withRetry utility; SDK delegates) | task-06 | |
 | §5.4 — Logger hook (request_sent, retry_attempt, request_failed) | task-06 | |
-| §6 — Edge cases 6.1–6.16 | task-05 (6.1, 6.8, 6.11, 6.12), task-07 (6.2, 6.3, 6.4, 6.13, 6.16), task-08 (6.7, 6.9, 6.10), task-03 (6.6 serialize), task-04 (6.15) | 6.16 (platform op fails in a built-in tool) is unit-tested in task-07 via a MockPlatform that throws — structurally identical to 6.4 but exercised through the platform seam, so it has CI coverage |
+| §6 — Edge cases 6.1–6.16 | task-05 (6.1 mapper-half, 6.8, 6.11, 6.12), task-07 (6.1 runTools-half, 6.2, 6.3, 6.4, 6.13, 6.16), task-08 (6.7, 6.9, 6.10), task-03 (6.6 serialize), task-04 (6.15) | 6.1 malformed tool input is split: task-05's mapper sets `input: {}` + `inputParseError: true`; task-07's runTools detects the flag (before Zod) and emits the dedicated message. 6.16 (platform op fails in a built-in tool) is unit-tested in task-07 via a MockPlatform that throws — structurally identical to 6.4 but exercised through the platform seam, so it has CI coverage |
 | §6.5 — Tool hang (M1 known gap) | N/A — documented in known-issues | Deferred by design |
 | §7 — Success criteria (14 items) | See success-criteria table below | |
 | §8 — Testing strategy (MockProvider, MockPlatform, test files) | task-07, task-08 | Mocks defined in test files |
@@ -165,6 +165,12 @@ The **loop control flow** (task 7) is the second-highest-risk piece: the interpl
 | 7.12 No core fs/process imports | task-09 | ESLint no-restricted-imports + no-restricted-globals |
 | 7.13 Env context injection | task-04, task-08 | env-context.test.ts (builder output) + agent.test.ts (end-to-end: env block injected into the request `systemPrompt`) |
 | 7.14 Logger off by default | task-06 | anthropic.test.ts (mock-SDK: no logger → zero console output when `stream()` runs; logger set → `request_sent` fires) |
+| 7.15 Git-absent degradation | task-04 | env-context.test.ts (exec throws / non-zero exit → git lines omitted, returns normally, no error) |
+| 7.16 Multiple tools in one turn | task-07 | loop.test.ts (two `tool_use` blocks → two `tool_result`s bundled into a single user message) |
+| 7.17 Abort on abandonment | task-08 | agent.test.ts (break `for await` early → captured `AbortSignal.aborted === true`) |
+| 7.18 Incremental streaming | task-07 | loop.test.ts (multiple `text_delta` events surface separately and in order before `turn_complete`) |
+
+> Note: success criteria are now **1–18** (brainstorm) / **7.1–7.18** (engineering §8.3). 7.1–7.14 map 1:1 to the prior set; 7.15–7.18 were added in the Opus refine pass. The §6.1 malformed-tool-input path (mapper `inputParseError` flag → runTools dedicated message) is covered by task-05 (`anthropic-mapper.test.ts`) + task-07 (`runTools.test.ts`).
 
 ### Explicit deferrals
 
@@ -178,7 +184,9 @@ The **loop control flow** (task 7) is the second-highest-risk piece: the interpl
 - **Tool hang handling** — Same as above. Developer adds `Promise.race` in `call`; framework does not provide timeout in M1.
 - **NodePlatform unit tests** — Per engineering spec §8.4, NodePlatform is not unit-tested in M1 (integration-tested via the example script). No dedicated test task created.
 - **Cost/token tracking (message_start events)** — M2. `message_start` events are consumed but not surfaced by the mapper in M1. No task created.
-- **`provider_retry` event** — mentioned in brainstorm as a future improvement; not in M1 event union. No task created.
+- **`provider_retry` event** — engineering refine confirms it is **not feasible in M1** while retry is SDK-delegated (the Anthropic SDK exposes no public retry hook); `retry_attempt` logging is best-effort. Not in M1 event union. No task created.
+- **Stream-idle watchdog** — edge case 6.17. M1 relies on the vendor SDK's request timeout; no engine-level idle watchdog (the reference's 90s `STREAM_IDLE_TIMEOUT_MS`). M2. Documented in known-issues. No task created.
+- **Cooperative tool cancellation** — edge case 6.18. M1 aborts only the provider stream on abandonment; a tool's `call` is not interrupted. The seam is reserved (an optional `signal?` on `ToolCallContext`) but unused in M1. M2. No task created.
 
 ---
 

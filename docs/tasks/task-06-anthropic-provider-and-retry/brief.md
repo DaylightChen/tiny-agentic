@@ -44,13 +44,13 @@ Note: `AnthropicProvider`'s full request/response correctness is validated end-t
 
    Constructor:
    - Throw `new Error("AnthropicProvider: ANTHROPIC_API_KEY is required")` if `options.apiKey` is falsy.
-   - Store `this.maxRetries`, `this.maxTokens`, `this.logger`, `this.model`.
+   - Store `this.maxRetries` (default 3), `this.maxTokens` (**default 32000** — `options.maxTokens ?? 32000`; the Anthropic API requires `max_tokens`, so the provider always resolves a concrete value), `this.logger`, `this.model`.
    - Construct `this.client = new Anthropic({ apiKey: options.apiKey, maxRetries: this.maxRetries, ...(options.baseURL ? { baseURL: options.baseURL } : {}) })`.
    - `exactOptionalPropertyTypes` note: use conditional spread for `baseURL` — do not pass `baseURL: undefined`.
 
    `stream(request, signal?)`:
    - Call `this.logger?.({ level: "info", event: "request_sent", request })`.
-   - Call `mapRequest(request, this.model, this.maxTokens)` to get `params`.
+   - Call `mapRequest(request, this.model, this.maxTokens)` to get `params`. Inside `mapRequest`, `max_tokens` resolves as `request.maxTokens ?? this.maxTokens` (per-request override → provider default 32000), so a concrete `max_tokens` is always sent.
    - Create `new InputAccumulator()`.
    - Call `this.client.messages.stream(params, { signal })` — pass the signal as the second argument (options object). Check the Anthropic SDK's `stream()` signature — if it accepts `{ signal }` in the options, use that. If the API changed, adapt accordingly and note the deviation in the completion doc. Note: `mapRequest` sets `stream: true` in `params`; the `messages.stream()` helper implies streaming and its param type may not declare `stream`. This is structurally assignable (extra property on a typed variable, not an object literal, so no excess-property error) and harmless at runtime — but verify the call typechecks. If the SDK rejects the extra field, either drop `stream: true` from `mapRequest` (and have the mapper target `MessageCreateParamsStreaming` only for the `.create()` path) or switch to `this.client.messages.create({ ...params, stream: true })`, which also yields raw stream events. Note whichever you choose in the completion doc.
    - `for await (const event of rawStream)`: call `translateStreamEvent(event, accumulator)`, yield each resulting `ProviderEvent`.

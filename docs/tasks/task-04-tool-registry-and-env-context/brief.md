@@ -99,7 +99,7 @@ Implement `packages/core/src/tools/registry.ts` (the `ToolRegistry` class) and `
    - **Git not a repo (non-zero exit):** mock exec returns `{ stdout: "", stderr: "fatal: ...", exitCode: 128 }`. Assert git lines omitted.
    - **Clean repo:** exec responses give `{ stdout: "feature\n", exitCode: 0 }` and `{ stdout: "", exitCode: 0 }`. Assert `Git status: clean`.
 
-   This covers success criterion 7.13.
+   This covers success criterion 7.13 (env context injection) and **7.15 (git-absent degradation)**: the "No git (exec throws)" and "Git not a repo (non-zero exit)" cases above assert the git lines are omitted with no error thrown — so `buildEnvContext` returns normally and a run on a git-less platform proceeds to `agent_done` rather than failing.
 
 5. **Run `pnpm --filter tiny-agentic test`** — all tests (collect + env-context) pass.
 
@@ -113,6 +113,7 @@ Implement `packages/core/src/tools/registry.ts` (the `ToolRegistry` class) and `
 - [ ] `packages/core/src/env/context.ts` exists and exports `buildEnvContext`.
 - [ ] Manually verify `toSchemas()` output: construct a `ToolRegistry` with one tool whose `inputSchema` is `z.object({ path: z.string() })`, call `toSchemas()`, assert the result has `inputSchema.type === "object"` and `inputSchema.properties.path`.
 - [ ] Success criterion 7.13 is green: the env context output contains cwd, date, git branch when the mock platform returns valid git output.
+- [ ] Success criterion 7.15 (git-absent degradation) is green: when the mock platform's `exec` throws or returns a non-zero exit, `buildEnvContext` omits the git lines and returns normally (no throw).
 
 ## Output files
 

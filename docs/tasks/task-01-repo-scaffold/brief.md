@@ -10,7 +10,7 @@ Create the complete pnpm monorepo skeleton for tiny-agentic. At the end of this 
 - A root `tsconfig.base.json` that all packages extend.
 - A root `eslint.config.js` with the boundary enforcement rules (no-restricted-imports for core, sdk).
 - A root `package.json` with workspace-level scripts (`build`, `test`, `lint`, `typecheck`).
-- A `.node-version` / `.nvmrc` pinning Node 18 LTS.
+- A `.node-version` / `.nvmrc` pinning Node 22 LTS.
 - An `.npmrc` with `shamefully-hoist=false`.
 - Each package has its own `package.json`, `tsconfig.json`, and a single stub `src/index.ts` (one-line `// TODO` comment).
 
@@ -35,7 +35,7 @@ This task exists to flush out toolchain compatibility problems (pnpm version, No
 
 ## Steps
 
-1. **Verify Node and pnpm versions.** Confirm Node >=18 is active (`node --version`). Confirm pnpm is available (`pnpm --version`). If pnpm is not installed, install it via `npm install -g pnpm` or `corepack enable && corepack prepare pnpm@latest --activate`.
+1. **Verify Node and pnpm versions.** Confirm Node >=22 is active (`node --version`). Node 18 and 20 are both EOL as of 2026-06 — Node 22 is the supported LTS floor (see `docs/decisions.md` "skipLibCheck + @types/node pinned to the runtime floor"). Confirm pnpm is available (`pnpm --version`). If pnpm is not installed, install it via `npm install -g pnpm` or `corepack enable && corepack prepare pnpm@latest --activate`.
 
 2. **Create root config files.**
    - `pnpm-workspace.yaml` (includes `examples` so the integration script in task 10 can resolve `tiny-agentic` via a workspace symlink — see Downstream dependencies):
@@ -44,7 +44,7 @@ This task exists to flush out toolchain compatibility problems (pnpm version, No
        - "packages/*"
        - "examples"
      ```
-   - `.node-version` (and `.nvmrc` symlink or copy): `18.20.8` (latest 18 LTS patch)
+   - `.node-version` (and `.nvmrc` symlink or copy): `22.16.0` (a current 22 LTS patch — use the latest 22.x LTS patch available at implement time)
    - `.npmrc`:
      ```
      shamefully-hoist=false
@@ -71,7 +71,7 @@ This task exists to flush out toolchain compatibility problems (pnpm version, No
      }
      ```
 
-3. **Create `tsconfig.base.json` at repo root.** Use exactly the compiler options from the code-architecture doc:
+3. **Create `tsconfig.base.json` at repo root.** Use exactly the compiler options from the code-architecture doc. Note `"types": ["node"]` and `"skipLibCheck": true` — these are load-bearing (see `docs/decisions.md` "skipLibCheck + @types/node pinned to the runtime floor"): `@types/node` supplies the ambient `AbortSignal` type used in `Provider.stream(request, signal?)`, and `skipLibCheck: true` is what lets `pnpm -r typecheck` pass with a runtime-accurate `@types/node@22` (it stops `tsc` from type-checking third-party bundled `.d.ts`, e.g. vite's via vitest, that reference newer globals). `types: ["node"]` keeps the ambient global set explicit (only Node globals):
    ```json
    {
      "compilerOptions": {
@@ -82,11 +82,12 @@ This task exists to flush out toolchain compatibility problems (pnpm version, No
        "lib": ["ES2022"],
        "module": "Node16",
        "moduleResolution": "Node16",
+       "types": ["node"],
        "declaration": true,
        "declarationMap": true,
        "sourceMap": true,
        "esModuleInterop": true,
-       "skipLibCheck": false,
+       "skipLibCheck": true,
        "forceConsistentCasingInFileNames": true
      }
    }
@@ -96,12 +97,12 @@ This task exists to flush out toolchain compatibility problems (pnpm version, No
 
 5. **Create `packages/core/` package.**
    - `packages/core/package.json` — use the "key fields" from the code-architecture doc exactly. Key points:
-     - `"name": "tiny-agentic"`, `"version": "0.1.0"`, `"type": "module"`, `"engines": { "node": ">=18.0.0" }`
+     - `"name": "tiny-agentic"`, `"version": "0.1.0"`, `"type": "module"`, `"engines": { "node": ">=22.0.0" }` (Node 18/20 are EOL; 22 is the supported LTS floor — see `docs/decisions.md`)
      - exports map with 4 entries (`.`, `./providers/anthropic`, `./platform/node`, `./utils`)
      - `dependencies`: `{ "zod-to-json-schema": "^3.23.0" }`
      - `peerDependencies`: `{ "zod": "^3.22.0", "@anthropic-ai/sdk": "^0.52.0" }`
      - `peerDependenciesMeta`: `{ "@anthropic-ai/sdk": { "optional": true } }`
-     - `devDependencies`: `{ "@anthropic-ai/sdk": "^0.52.0", "typescript": "^5.7.0", "tsup": "^8.0.0", "vitest": "^3.0.0" }`
+     - `devDependencies`: `{ "@anthropic-ai/sdk": "^0.52.0", "@types/node": "^22.0.0", "typescript": "^5.7.0", "tsup": "^8.0.0", "vitest": "^3.0.0" }` — `@types/node` is pinned to `^22` (the runtime floor) and supplies the ambient `AbortSignal` type; it is a devDependency (types only, stripped at build), not a runtime dependency
      - scripts: `build: "tsup"`, `typecheck: "tsc --noEmit"`, `test: "vitest run"`, `test:watch: "vitest"`
    - `packages/core/tsconfig.json`:
      ```json
@@ -115,13 +116,14 @@ This task exists to flush out toolchain compatibility problems (pnpm version, No
      }
      ```
    - `packages/core/tsup.config.ts` — exact config from code-architecture doc (4 entry points).
-   - `packages/core/vitest.config.ts`:
+   - `packages/core/vitest.config.ts` (`passWithNoTests: true` so `pnpm --filter tiny-agentic test` is green at task 01, when no `*.test.ts` files exist yet — the first tests arrive in task 03):
      ```ts
      import { defineConfig } from "vitest/config";
      export default defineConfig({
        test: {
          globals: false,
          environment: "node",
+         passWithNoTests: true,
        },
      });
      ```
@@ -226,6 +228,10 @@ This task exists to flush out toolchain compatibility problems (pnpm version, No
 - [ ] `pnpm -r typecheck` exits with code 0. With `typecheck` scripts present in all three packages, the command actually runs in `core`, `sdk`, and `ui` (not just core).
 - [ ] `pnpm --filter tiny-agentic build` exits with code 0 — all four tsup entry points resolve (the three stub entries plus `index.ts`) and emit to `dist/`. This guards against the missing-entry build failure.
 - [ ] `pnpm lint` exits with code 0 (or exits with "no files matched" warning — not an error).
+- [ ] `pnpm --filter tiny-agentic test` exits with code 0 — `passWithNoTests: true` makes vitest green when no `*.test.ts` files exist yet.
+- [ ] `cat packages/core/package.json | grep '"node"'` shows `>=22.0.0`; `cat .node-version` shows a `22.x` patch.
+- [ ] `cat tsconfig.base.json | grep skipLibCheck` shows `true`; `grep '"types"' tsconfig.base.json` shows `["node"]`.
+- [ ] `cat packages/core/package.json | grep '@types/node'` shows `^22`.
 - [ ] `ls packages/` shows exactly `core/`, `sdk/`, `ui/`.
 - [ ] `ls packages/core/src/providers/anthropic.ts packages/core/src/platform/node.ts packages/core/src/utils/collect.ts` all exist (stub entry files).
 - [ ] `cat examples/package.json | grep '"tiny-agentic"'` shows `workspace:*` (example resolves the core package via the workspace).

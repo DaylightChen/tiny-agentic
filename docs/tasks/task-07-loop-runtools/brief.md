@@ -34,11 +34,12 @@ This is the heart of the agentic engine. Getting it right here — before the `A
 
 1. **Create `packages/core/src/loop/runTools.ts`** — implement exactly as in the code-architecture doc. Key points:
    - Accepts `(toolUses, registry, platform, context)`.
-   - For each tool use block (sequential `for...of`):
+   - `ToolUseEntry` is `{ id: string; name: string; input: unknown; parseError?: boolean }`. For each tool use block (sequential `for...of`):
      a. `registry.findByName(tu.name)` — if undefined, yield unknown-tool error event and `continue`.
-     b. `tool.inputSchema.safeParse(tu.input)` — if failure, yield Zod validation error event and `continue`.
-     c. `await tool.call(parseResult.data, platform, context)` — in try/catch: yield success event on success, yield error event on catch.
-   - Error strings: `"Unknown tool: '<name>'"`, `"Tool '<name>': invalid input — <zod message>"`, caught error message (`err instanceof Error ? err.message : String(err)`).
+     b. **Malformed-input check (§6.1), BEFORE Zod:** if `tu.parseError === true` (the mapper flagged unparseable streamed JSON), yield a `tool_result` with `isError: true` and result `"Tool '<name>': could not parse tool input as JSON"`, then `continue`. This must come before the Zod step so the model gets the dedicated parse-error message, not an ambiguous Zod failure. There is **no `PARSE_ERROR` symbol** — detection is purely the boolean flag.
+     c. `tool.inputSchema.safeParse(tu.input)` — if failure, yield Zod validation error event and `continue`.
+     d. `await tool.call(parseResult.data, platform, context)` — in try/catch: yield success event on success, yield error event on catch.
+   - Error strings: `"Unknown tool: '<name>'"`, `"Tool '<name>': could not parse tool input as JSON"`, `"Tool '<name>': invalid input — <zod message>"`, caught error message (`err instanceof Error ? err.message : String(err)`).
    - This generator never throws — every error path is caught and yielded as `tool_result`.
    - **M2 concurrency seam comment:** add a comment before the `for...of` noting that M2 will check `tool.isConcurrencySafe?.(input)` and batch safe calls via `Promise.all`.
 
@@ -47,6 +48,7 @@ This is the heart of the agentic engine. Getting it right here — before the `A
    - Before the `while(true)` loop: construct `context: ToolCallContext = {}` (once per run), call `registry.toSchemas()` for `toolSchemas` (once per run).
    - Inside the loop: check `turnsUsed >= maxTurns` first.
    - Streaming: `for await (const event of provider.stream({ systemPrompt, messages: workingMessages, tools: toolSchemas }, signal))` — in `try/catch`. On catch, yield `agent_error` and return the error Terminal.
+   - **Parse-error flag threading:** `pendingToolUses` entries carry `parseError: boolean`, derived from each `tool_use` event's `inputParseError` (default `false`). The assistant `tool_use` content block pushed into `workingMessages` uses the event's `input` — which is a serializable `{}` placeholder on a parse error (never a symbol) — so threaded history stays valid on every turn. The `parseError` flag rides only on `pendingToolUses` and is consumed by `runTools`; it is **not** persisted into the message.
    - After streaming: build `assistantContent[]`, push to `workingMessages` only if non-empty (skip empty assistant turns — avoid API rejection of `{ content: [] }`).
    - Increment `turnsUsed`.
    - Tool execution: `for await` over `runTools(...)`, yield each event, accumulate `toolResultBlocks`. After the loop, push `{ role: "user", content: toolResultBlocks }` to `workingMessages`.
@@ -73,7 +75,8 @@ This is the heart of the agentic engine. Getting it right here — before the `A
    - **Tool `call` throws:** tool whose `call` throws `new Error("boom")` → assert `isError: true`, `result === "boom"`.
    - **Built-in platform op fails (edge case 6.16):** a tool whose `call` does `await platform.readFile(path)` against a `MockPlatform` configured to throw (e.g. `readFile` rejects with `new Error("ENOENT: /nope")`) → assert `isError: true`, `result` contains the platform error message. This proves a `Platform` failure surfacing through a tool is caught and fed back as a recoverable `tool_result` (structurally the same path as 6.4, but exercised through the platform seam so it has CI coverage rather than relying on the task-10 example).
    - **Two tools in sequence:** two tool entries; assert two events yielded in order.
-   - (Success criteria 7.3 and 7.4, and edge cases 6.4/6.16, are covered here.)
+   - **Malformed streamed input (§6.1, the `inputParseError` path):** `runTools([{ id: "1", name: "<known tool>", input: {}, parseError: true }], registry, platform, {})` → assert `isError: true` and `result === "Tool '<name>': could not parse tool input as JSON"`. Verify the message is the parse-error message (not `"invalid input — ..."`), proving detection happens before Zod. Use a tool whose schema would otherwise reject `{}`, so a missing parse-error branch would surface as a Zod message instead.
+   - (Success criteria 7.3 and 7.4, edge cases 6.4/6.16, and the §6.1 parse-error path are covered here.)
 
 4. **Create `packages/core/src/__tests__/loop.test.ts`** — tests for `agentLoop`:
 
@@ -112,6 +115,8 @@ This is the heart of the agentic engine. Getting it right here — before the `A
    - **Max turns exceeded:** MockProvider always returns a tool-use turn. `maxTurns: 2`. Assert that after 2 `turn_complete` events, `max_turns_exceeded` is yielded with `turnsUsed: 2`. `terminal.reason === "max_turns_exceeded"`. (Success criterion 7.5.)
    - **API error:** MockProvider throws on `stream()`. Assert `agent_error` event is yielded; `terminal.reason === "agent_error"`. Generator exhausts. (Success criterion 7.6.)
    - **Empty assistant turn:** MockProvider yields only `message_stop(end_turn)` (no text, no tools). Assert: no assistant message pushed to workingMessages (cannot push empty content), `turn_complete` then `agent_done` emitted.
+   - **Multiple tools in one turn (success criterion 7.16, edge case 6.3):** turn 1 yields two `tool_use` events with distinct ids + `message_stop("tool_use")`; turn 2 yields `text_delta + message_stop("end_turn")`. Register both tools. Assert: two `tool_result` events are yielded, and both results are bundled into a **single** `user` message with two `tool_result` content blocks (capture the request the MockProvider receives on turn 2 and assert its last message is one `user` message whose `content` array has two `tool_result` blocks with the matching `tool_use_id`s). Then `agent_done`.
+   - **Incremental streaming (success criterion 7.18):** a single turn yields several `text_delta` events (e.g. `"a"`, `"b"`, `"c"`) then `message_stop("end_turn")`. Assert the collected events contain three separate `text_delta` entries, in order, all appearing **before** the turn's `turn_complete` — i.e. deltas surface incrementally, not coalesced into one event.
 
 5. **Run `pnpm --filter tiny-agentic test`** — all tests pass (collect, env-context, anthropic-mapper, retry, runTools, loop).
 
@@ -126,6 +131,9 @@ This is the heart of the agentic engine. Getting it right here — before the `A
 - [ ] Success criterion 7.4 (unknown tool handling) covered by `runTools.test.ts` test.
 - [ ] Success criterion 7.5 (max turns safety) covered by `loop.test.ts` test.
 - [ ] Success criterion 7.6 (API error handling) covered by `loop.test.ts` test.
+- [ ] Success criterion 7.16 (multiple tools in one turn → bundled into a single user message) covered by `loop.test.ts` test.
+- [ ] Success criterion 7.18 (incremental streaming — separate ordered `text_delta` events) covered by `loop.test.ts` test.
+- [ ] §6.1 malformed-input parse-error path covered by `runTools.test.ts` (`parseError: true` → dedicated message, emitted before Zod).
 - [ ] `LoopParams` is exported from `loop/loop.ts` (task 08 depends on it).
 - [ ] `runTools` never throws — verify by reading the code: every `await tool.call(...)` is inside `try/catch`.
 
