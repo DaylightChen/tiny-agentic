@@ -19,15 +19,15 @@ project
 - `plan` approved (Opus refine, commit `80de5e0`): `docs/plan/implementation-plan.md` + 10 refined briefs.
 
 ## What's Next
-- Opus dev-loop on **task 02** (core shared types: messages, platform, tool+defineTool, provider w/ `inputParseError`, events), then 03→10. Auto-proceeding, committing each task on green review.
+- Opus dev-loop on **task 03** (NodePlatform, serializeToolResult, collectText/collectEvents + tests), then 04→10. Auto-proceeding, committing each task on green review.
 
 ## Task Progress
 
 | # | Task | Status |
 |---|------|--------|
 | 01 | task-01-repo-scaffold | done (`8446076`) |
-| 02 | task-02-core-types | in progress |
-| 03 | task-03-platform-node | pending |
+| 02 | task-02-core-types | done (`e92a2f4`) |
+| 03 | task-03-platform-node | in progress |
 | 04 | task-04-tool-registry-and-env-context | pending |
 | 05 | task-05-anthropic-mapper | pending |
 | 06 | task-06-anthropic-provider-and-retry | pending |

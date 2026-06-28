@@ -28,4 +28,4 @@
 - **Verification (orchestrator, Node v22.22.0):** `typecheck`→0; `test`→ 3 passed (`types.test.ts`); `build`→0; `lint`→0.
 - **Acceptance criteria:** all met (5 modules export expected symbols; DAG clean; empty `ToolCallContext` lints; `inputParseError` present, no `PARSE_ERROR`; `defineTool` inference guarded).
 - **Deviations:** none. **Regressions:** none.
-- **Commit:** _(filled after commit lands)_
+- **Commit:** `e92a2f4` — "Task 02 (Opus redo): core shared types + defineTool"
