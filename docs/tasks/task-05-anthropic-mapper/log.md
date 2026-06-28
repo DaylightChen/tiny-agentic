@@ -29,4 +29,4 @@
 - **Verification (orchestrator, Node v22.22.0):** test 37/37; typecheck→0; lint→0.
 - **Acceptance criteria:** all met (mapRequest snake_case input_schema + max_tokens; multi-block; malformed JSON → inputParseError+`{}` (no null); stop_reason cached; exports stable; no PARSE_ERROR).
 - **Deviations:** followed the brief over a stale skeleton on 4 surface points (reviewer-endorsed; skeleton since synced). **Regressions:** none.
-- **Commit:** _(filled after commit lands)_
+- **Commit:** `29326dd` — "Task 05 (Opus redo): Anthropic stream mapper (inputParseError + stop_reason)"

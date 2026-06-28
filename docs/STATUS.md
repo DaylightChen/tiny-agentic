@@ -19,7 +19,7 @@ project
 - `plan` approved (Opus refine, commit `80de5e0`): `docs/plan/implementation-plan.md` + 10 refined briefs.
 
 ## What's Next
-- Opus dev-loop on **task 05** (anthropic-mapper: mapRequest, InputAccumulator w/ stop_reason caching, translateStreamEvent w/ inputParseError flag), then 06→10. Auto-proceeding, committing each task on green review.
+- Opus dev-loop on **task 06** (AnthropicProvider — SDK-delegated retry, signal, logger — + withRetry utility + mock-SDK logger test), then 07→10. Auto-proceeding, committing each task on green review.
 
 ## Task Progress
 
@@ -29,8 +29,8 @@ project
 | 02 | task-02-core-types | done (`e92a2f4`) |
 | 03 | task-03-platform-node | done (`6cf6a1a`) |
 | 04 | task-04-tool-registry-and-env-context | done (`9ae75f7`) |
-| 05 | task-05-anthropic-mapper | in progress |
-| 06 | task-06-anthropic-provider-and-retry | pending |
+| 05 | task-05-anthropic-mapper | done (`29326dd`) |
+| 06 | task-06-anthropic-provider-and-retry | in progress |
 | 07 | task-07-loop-runtools | pending |
 | 08 | task-08-agent-and-index | pending |
 | 09 | task-09-lint-and-boundary-verification | pending |
