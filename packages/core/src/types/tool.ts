@@ -18,6 +18,24 @@ export interface ToolCallContext {
 }
 
 /**
+ * Decision returned by an ApprovalHandler.
+ */
+export type ApprovalDecision = 'allow' | 'deny';
+
+/**
+ * Optional callback injected into AgentOptions. Called before every tool.call,
+ * after Zod validation. Return 'allow' to proceed or 'deny' to block. If this
+ * callback throws, the tool call is blocked and the error message is returned
+ * to the model.
+ *
+ * If not provided, all tool calls are allowed (blanket allow default).
+ */
+export type ApprovalHandler = (
+  toolName: string,
+  input: unknown,
+) => Promise<ApprovalDecision>;
+
+/**
  * A tool that can be called by the model.
  *
  * @template TInput - Zod schema type for the tool's input. Inferred in practice.

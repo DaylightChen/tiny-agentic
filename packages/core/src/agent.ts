@@ -1,5 +1,5 @@
 import type { Provider } from "./types/provider.js";
-import type { Tool } from "./types/tool.js";
+import type { ApprovalHandler, Tool } from "./types/tool.js";
 import type { Platform } from "./types/platform.js";
 import type { AgentEvent, Terminal } from "./types/events.js";
 import type { Message } from "./types/messages.js";
@@ -13,6 +13,7 @@ export type AgentOptions = {
   platform: Platform;
   systemPrompt?: string;
   maxTurns?: number; // default: 25
+  approvalHandler?: ApprovalHandler;
 };
 
 export type RunOptions = {
@@ -25,6 +26,7 @@ export class Agent {
   private readonly platform: Platform;
   private readonly systemPrompt: string | undefined;
   private readonly maxTurns: number;
+  private readonly approvalHandler: ApprovalHandler | undefined;
 
   constructor(options: AgentOptions) {
     this.provider = options.provider;
@@ -32,6 +34,7 @@ export class Agent {
     this.platform = options.platform;
     this.systemPrompt = options.systemPrompt;
     this.maxTurns = options.maxTurns ?? 25;
+    this.approvalHandler = options.approvalHandler;
   }
 
   async *run(prompt: string, options: RunOptions = {}): AsyncGenerator<AgentEvent, Terminal> {

@@ -1,6 +1,6 @@
 import type { AgentEvent } from "../types/events.js";
 import type { Platform } from "../types/platform.js";
-import type { ToolCallContext } from "../types/tool.js";
+import type { ApprovalDecision, ApprovalHandler, ToolCallContext } from "../types/tool.js";
 import { ToolRegistry } from "../tools/registry.js";
 
 type ToolUseEntry = { id: string; name: string; input: unknown; parseError?: boolean };
@@ -16,6 +16,7 @@ export async function* runTools(
   registry: ToolRegistry,
   platform: Platform,
   context: ToolCallContext,
+  approvalHandler?: ApprovalHandler,
 ): AsyncGenerator<AgentEvent> {
   for (const tu of toolUses) {
     const tool = registry.findByName(tu.name);
@@ -56,6 +57,33 @@ export async function* runTools(
         isError: true,
       };
       continue;
+    }
+
+    // Approval gate — runs after Zod validation, before tool.call
+    if (approvalHandler !== undefined) {
+      let decision: ApprovalDecision;
+      try {
+        decision = await approvalHandler(tool.name, parseResult.data);
+      } catch (err) {
+        yield {
+          type: "tool_result",
+          toolName: tool.name,
+          toolCallId: tu.id,
+          result: `Tool '${tool.name}': approval check failed — ${err instanceof Error ? err.message : String(err)}`,
+          isError: true,
+        };
+        continue;
+      }
+      if (decision !== 'allow') {
+        yield {
+          type: "tool_result",
+          toolName: tool.name,
+          toolCallId: tu.id,
+          result: `Tool '${tool.name}': call denied by approvalHandler`,
+          isError: true,
+        };
+        continue;
+      }
     }
 
     try {

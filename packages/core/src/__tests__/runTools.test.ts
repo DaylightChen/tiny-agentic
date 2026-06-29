@@ -1,4 +1,4 @@
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, vi } from "vitest";
 import { z } from "zod";
 
 import { runTools } from "../loop/runTools.js";
@@ -251,5 +251,200 @@ describe("runTools", () => {
       "1",
       "2",
     ]);
+  });
+});
+
+describe("approvalHandler gate", () => {
+  it("no handler (undefined) — tool.call is invoked and success result yielded", async () => {
+    // Explicit undefined (omitted 5th arg) is the blanket-allow default.
+    // This test documents the contract; existing tests also rely on this behaviour.
+    const callSpy = vi.fn().mockResolvedValue({ ok: true });
+    const tool = defineTool({
+      name: "blanket_allow",
+      description: "always allowed",
+      inputSchema: z.object({}).passthrough(),
+      call: callSpy,
+    });
+    const registry = makeRegistry([tool]);
+
+    const events = await collect(
+      runTools([{ id: "1", name: "blanket_allow", input: {} }], registry, new MockPlatform(), ctx),
+    );
+
+    expect(events).toHaveLength(1);
+    const ev = toolResultAt(events, 0);
+    expect(ev.isError).toBe(false);
+    expect(callSpy).toHaveBeenCalledOnce();
+  });
+
+  it("handler returns 'allow' — tool.call is invoked", async () => {
+    const callSpy = vi.fn().mockResolvedValue({ ok: true });
+    const tool = defineTool({
+      name: "allowed_tool",
+      description: "will be allowed",
+      inputSchema: z.object({}).passthrough(),
+      call: callSpy,
+    });
+    const registry = makeRegistry([tool]);
+    const handler = vi.fn().mockResolvedValue("allow");
+
+    const events = await collect(
+      runTools(
+        [{ id: "2", name: "allowed_tool", input: {} }],
+        registry,
+        new MockPlatform(),
+        ctx,
+        handler,
+      ),
+    );
+
+    expect(handler).toHaveBeenCalledOnce();
+    expect(callSpy).toHaveBeenCalledOnce();
+    expect(events).toHaveLength(1);
+    const ev = toolResultAt(events, 0);
+    expect(ev.isError).toBe(false);
+  });
+
+  it("handler returns 'deny' — tool.call is NOT invoked; isError true with exact denial string", async () => {
+    const callSpy = vi.fn().mockResolvedValue({ ok: true });
+    const tool = defineTool({
+      name: "denied_tool",
+      description: "will be denied",
+      inputSchema: z.object({}).passthrough(),
+      call: callSpy,
+    });
+    const registry = makeRegistry([tool]);
+    const handler = vi.fn().mockResolvedValue("deny");
+
+    const events = await collect(
+      runTools(
+        [{ id: "3", name: "denied_tool", input: {} }],
+        registry,
+        new MockPlatform(),
+        ctx,
+        handler,
+      ),
+    );
+
+    // tool.call must NOT have run
+    expect(callSpy).not.toHaveBeenCalled();
+
+    expect(events).toHaveLength(1);
+    const ev = toolResultAt(events, 0);
+    expect(ev.isError).toBe(true);
+    expect(ev.toolName).toBe("denied_tool");
+    // Exact string from spec §3.5 / §8.3
+    expect(ev.result).toBe("Tool 'denied_tool': call denied by approvalHandler");
+  });
+
+  it("handler throws — tool.call is NOT invoked; isError true with 'approval check failed' message", async () => {
+    const callSpy = vi.fn().mockResolvedValue({ ok: true });
+    const tool = defineTool({
+      name: "check_throws",
+      description: "handler will throw",
+      inputSchema: z.object({}).passthrough(),
+      call: callSpy,
+    });
+    const registry = makeRegistry([tool]);
+    const handler = vi.fn().mockRejectedValue(new Error("boom"));
+
+    const events = await collect(
+      runTools(
+        [{ id: "4", name: "check_throws", input: {} }],
+        registry,
+        new MockPlatform(),
+        ctx,
+        handler,
+      ),
+    );
+
+    // tool.call must NOT have run
+    expect(callSpy).not.toHaveBeenCalled();
+
+    expect(events).toHaveLength(1);
+    const ev = toolResultAt(events, 0);
+    expect(ev.isError).toBe(true);
+    expect(ev.toolName).toBe("check_throws");
+    // Must contain the sentinel phrase from spec §3.5 / §8.3
+    expect(String(ev.result)).toContain("approval check failed");
+    // Must also carry the original error message
+    expect(String(ev.result)).toContain("boom");
+  });
+
+  it("handler receives Zod-parsed (validated) input, not raw input", async () => {
+    // The schema supplies a default for `n`. Calling the tool with `{}` (raw input
+    // has no `n`) means Zod will default it to 42. The handler must see `{ n: 42 }`,
+    // not `{}`, proving the gate runs after — not before — Zod validation.
+    const tool = defineTool({
+      name: "defaulted_input",
+      description: "schema with default",
+      inputSchema: z.object({ n: z.number().default(42) }),
+      call: async ({ n }) => n,
+    });
+    const registry = makeRegistry([tool]);
+    const handler = vi.fn().mockResolvedValue("allow");
+
+    await collect(
+      runTools(
+        [{ id: "5", name: "defaulted_input", input: {} }],
+        registry,
+        new MockPlatform(),
+        ctx,
+        handler,
+      ),
+    );
+
+    expect(handler).toHaveBeenCalledOnce();
+    // First argument is toolName, second is validated (Zod-parsed) input
+    expect(handler).toHaveBeenCalledWith("defaulted_input", { n: 42 });
+  });
+
+  it("handler denies one tool but allows another — only the denied call is blocked", async () => {
+    // Tests that the gate evaluates per-tool-call, not globally.
+    const callA = vi.fn().mockResolvedValue("a-result");
+    const callB = vi.fn().mockResolvedValue("b-result");
+    const toolA = defineTool({
+      name: "tool_a",
+      description: "will be allowed",
+      inputSchema: z.object({}).passthrough(),
+      call: callA,
+    });
+    const toolB = defineTool({
+      name: "tool_b",
+      description: "will be denied",
+      inputSchema: z.object({}).passthrough(),
+      call: callB,
+    });
+    const registry = makeRegistry([toolA, toolB]);
+
+    const handler = vi.fn().mockImplementation((name: string) =>
+      Promise.resolve(name === "tool_a" ? "allow" : "deny"),
+    );
+
+    const events = await collect(
+      runTools(
+        [
+          { id: "10", name: "tool_a", input: {} },
+          { id: "11", name: "tool_b", input: {} },
+        ],
+        registry,
+        new MockPlatform(),
+        ctx,
+        handler,
+      ),
+    );
+
+    expect(events).toHaveLength(2);
+
+    const evA = toolResultAt(events, 0);
+    expect(evA.toolName).toBe("tool_a");
+    expect(evA.isError).toBe(false);
+    expect(callA).toHaveBeenCalledOnce();
+
+    const evB = toolResultAt(events, 1);
+    expect(evB.toolName).toBe("tool_b");
+    expect(evB.isError).toBe(true);
+    expect(evB.result).toBe("Tool 'tool_b': call denied by approvalHandler");
+    expect(callB).not.toHaveBeenCalled();
   });
 });

@@ -2,7 +2,7 @@ import type { Provider } from "../types/provider.js";
 import type { Platform } from "../types/platform.js";
 import type { AgentEvent, Terminal } from "../types/events.js";
 import type { Message, ContentBlock } from "../types/messages.js";
-import type { ToolCallContext } from "../types/tool.js";
+import type { ApprovalHandler, ToolCallContext } from "../types/tool.js";
 import { ToolRegistry } from "../tools/registry.js";
 import { runTools } from "./runTools.js";
 import { serializeToolResult } from "../utils/serialize.js";
@@ -15,6 +15,7 @@ export type LoopParams = {
   systemPrompt: string;
   maxTurns: number;
   signal: AbortSignal;
+  approvalHandler?: ApprovalHandler;
 };
 
 export async function* agentLoop(params: LoopParams): AsyncGenerator<AgentEvent, Terminal> {
