@@ -1,0 +1,107 @@
+#!/usr/bin/env tsx
+/**
+ * basic-run.ts — tiny-agentic integration example
+ *
+ * Run: ANTHROPIC_API_KEY=<key> pnpm tsx examples/basic-run.ts
+ *
+ * Exercises: tool registration, NodePlatform, event streaming, multi-turn threading.
+ * Demonstrates all major AgentEvent types.
+ * Not run in CI — requires a real Anthropic API key.
+ */
+
+import { Agent, readFileTool, writeFileTool, type Message } from "tiny-agentic";
+import { AnthropicProvider } from "tiny-agentic/providers/anthropic";
+import { NodePlatform } from "tiny-agentic/platform/node";
+import { collectText } from "tiny-agentic/utils";
+
+const apiKey = process.env["ANTHROPIC_API_KEY"];
+if (!apiKey) {
+  console.error("Error: ANTHROPIC_API_KEY environment variable is required.");
+  process.exit(1);
+}
+
+const provider = new AnthropicProvider({
+  apiKey,
+  // Must be a currently-valid Anthropic model id. The spec standardizes on
+  // claude-opus-4-8; for a throwaway example making ~4 calls, a cheaper id
+  // such as "claude-haiku-4-5" or "claude-sonnet-4-6" is also fine. Do NOT
+  // use "claude-opus-4-5" (not a valid id — the call would 404).
+  model: "claude-opus-4-8",
+  logger: (entry) => {
+    if (entry.event === "request_sent") {
+      console.error(`[provider] request sent (${entry.request.messages.length} messages, ${entry.request.tools.length} tools)`);
+    }
+  },
+});
+
+const agent = new Agent({
+  provider,
+  tools: [readFileTool, writeFileTool],
+  platform: new NodePlatform(),
+  systemPrompt: "You are a helpful assistant. Keep responses concise.",
+  maxTurns: 10,
+});
+
+// --- Turn 1: simple Q&A (no tools needed) ---
+console.log("\n=== Turn 1: Simple Q&A ===");
+let history: Message[] = [];
+
+for await (const event of agent.run("What is 2 + 2? Reply with just the number.", { messages: history })) {
+  switch (event.type) {
+    case "text_delta":
+      process.stdout.write(event.text);
+      break;
+    case "tool_use_start":
+      console.log(`\n[calling tool: ${event.toolName}]`);
+      break;
+    case "tool_result":
+      console.log(`[tool result: isError=${event.isError}, result=${JSON.stringify(event.result).slice(0, 80)}]`);
+      break;
+    case "agent_done":
+      history = event.messages;
+      console.log("\n[agent done]");
+      break;
+    case "agent_error":
+      console.error("\n[agent error]", event.error.message);
+      process.exit(1);
+      break;
+    case "max_turns_exceeded":
+      console.error("\n[max turns exceeded]");
+      process.exit(1);
+      break;
+  }
+}
+
+// --- Turn 2: multi-turn continuation (success criterion 7.9) ---
+console.log("\n=== Turn 2: Multi-turn continuation ===");
+
+for await (const event of agent.run("What did I just ask you? Repeat my question back to me.", { messages: history })) {
+  if (event.type === "text_delta") process.stdout.write(event.text);
+  if (event.type === "agent_done") {
+    history = event.messages;
+    console.log("\n[agent done, total messages:", history.length, "]");
+  }
+}
+
+// --- Turn 3: tool use (read this script file) ---
+console.log("\n=== Turn 3: Tool use (read_file) ===");
+
+for await (const event of agent.run(
+  `Read the file at "examples/basic-run.ts" and tell me what it does in one sentence.`
+)) {
+  switch (event.type) {
+    case "text_delta": process.stdout.write(event.text); break;
+    case "tool_use_start": console.log(`\n[calling: ${event.toolName}(${JSON.stringify(event.toolInput)})]`); break;
+    case "tool_result": console.log(`[result: isError=${event.isError}]`); break;
+    case "turn_complete": console.log(`[turn ${event.turnIndex} complete]`); break;
+    case "agent_done": console.log("\n[agent done]"); break;
+    case "agent_error": console.error("\n[agent error]", event.error.message); process.exit(1); break;
+  }
+}
+
+// --- collectText convenience (success criterion reference) ---
+console.log("\n=== collectText demo ===");
+const text = await collectText(agent.run("Say 'hello world' and nothing else."));
+console.log("collectText result:", text);
+
+console.log("\n=== All turns complete. Integration example finished. ===");

@@ -8,13 +8,13 @@ Write a runnable example script (`examples/basic-run.ts`) that exercises the ent
 
 - `examples/basic-run.ts` can be run with `ANTHROPIC_API_KEY=<key> pnpm tsx examples/basic-run.ts` and produces streaming text output from the model.
 - The script demonstrates: tool registration (readFileTool + writeFileTool), NodePlatform, event streaming to stdout, multi-turn history threading.
-- All 14 success criteria have a described observation path (either the test suite, lint/typecheck checks, or this example).
+- All 18 success criteria have a described observation path (either the test suite, lint/typecheck checks, or this example).
 
 This is the final validation layer — the unit test suite exercises mocked paths; this script exercises the real Anthropic SDK path end-to-end. It is not published or run in CI (requires `ANTHROPIC_API_KEY`); it is a developer-run integration check.
 
 ## Context files
 
-- `docs/brainstorm/2026-06-26-tiny-agentic-design.md` — §7 (all 14 success criteria to verify)
+- `docs/brainstorm/2026-06-26-tiny-agentic-design.md` — §7 (all 18 success criteria to verify)
 - `docs/engineering/2026-06-27-engineering-spec.md` — §8.4 (unit vs integration boundary), §11 (built-in tools)
 - `packages/core/package.json` — exports map (which import paths to use)
 - `packages/core/src/index.ts` (task 08) — what `"tiny-agentic"` exports
@@ -170,7 +170,7 @@ None — this is the final task. The example is a throwaway driver, not depended
    - Turn 3: `tool_use_start` event fires for `read_file`, `tool_result` fires (not error), model describes what the file does.
    - `collectText` returns "hello world" (or similar).
 
-7. **Verify all 14 success criteria are now observable:**
+7. **Verify all 18 success criteria are now observable:**
    - 7.1 Basic run: Turn 1 above.
    - 7.2 Tool use end-to-end: Turn 3 above.
    - 7.3 Tool error recovery: covered by runTools.test.ts.
