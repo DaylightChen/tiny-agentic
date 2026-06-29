@@ -45,4 +45,4 @@
 - **Verification (orchestrator, Node v22.22.0):** test 91/91; typecheck→0; lint→0; build→0 (4 entry pairs).
 - **Acceptance criteria:** all met (7.1, 7.6, 7.7/7.8, 7.9, 7.13, 7.17, serialize-catch, index exports, defineTool typed input) + new line-range behavior for both file tools.
 - **Scope add:** read_file `offset`/`limit`; write_file `offset`/`limit` range-replace (spec §11 + code-arch + decision + brief updated).
-- **Commit:** _(filled after commit lands)_
+- **Commit:** `2cdf170` — "Task 08 (Opus redo): Agent class, built-in tools (+line ranges), public index"

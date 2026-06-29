@@ -19,7 +19,9 @@ project
 - `plan` approved (Opus refine, commit `80de5e0`): `docs/plan/implementation-plan.md` + 10 refined briefs.
 
 ## What's Next
-- Opus dev-loop on **task 08** (Agent class + run() w/ AbortController, readFile/writeFile builtins, public index.ts; agent.test.ts incl 7.1/7.9/7.13/7.17 + the deferred serialize-catch test), then 09→10. Auto-proceeding, committing each task on green review.
+- Opus dev-loop on **task 09** (full-tree ESLint boundary + tsc strict verification across all packages; confirm 7.10/7.11/7.12), then task 10 (integration example). Auto-proceeding, committing each task on green review.
+
+> Note: built-in file tools gained optional line-range params (`read_file` offset/limit; `write_file` offset/limit range-replace) in task 08 — a user-requested scope addition (see `docs/decisions.md`).
 
 ## Task Progress
 
@@ -32,8 +34,8 @@ project
 | 05 | task-05-anthropic-mapper | done (`29326dd`) |
 | 06 | task-06-anthropic-provider-and-retry | done (`2a6f169`) |
 | 07 | task-07-loop-runtools | done (`6918f03`) |
-| 08 | task-08-agent-and-index | in progress |
-| 09 | task-09-lint-and-boundary-verification | pending |
+| 08 | task-08-agent-and-index | done (`2cdf170`) |
+| 09 | task-09-lint-and-boundary-verification | in progress |
 | 10 | task-10-integration-example | pending |
 
 ## Blockers
