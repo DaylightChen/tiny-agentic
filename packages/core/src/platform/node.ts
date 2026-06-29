@@ -27,32 +27,37 @@ export class NodePlatform implements Platform {
   }
 
   async exec(command: string, options: ExecOptions = {}): Promise<ExecResult> {
-    // Split command into program + args. Simple split; no shell expansion.
-    // For shell commands with pipes/redirects, use /bin/sh -c.
-    const [program, ...args] = command.split(" ");
-    // AbortSignal note (engineering spec §10.1): ExecOptions has a `timeout`
-    // field but no `signal` field. In M1, exec does not accept an AbortSignal —
-    // it relies on `timeout` only. To thread an AbortSignal in M2, add a
-    // `signal?: AbortSignal` field to ExecOptions and forward it here.
-    //
-    // exactOptionalPropertyTypes is ON: forward cwd/timeout/env with conditional
-    // spread so an absent option is an absent key, not an explicit `undefined`
+    // exactOptionalPropertyTypes is ON: forward all options with conditional
+    // spreads so absent options are absent keys, not explicit `undefined`
     // (execFileAsync treats those differently).
+    const spreadOpts = {
+      encoding: "utf-8" as const,
+      ...(options.cwd     !== undefined ? { cwd: options.cwd }         : {}),
+      ...(options.timeout !== undefined ? { timeout: options.timeout } : {}),
+      ...(options.env     !== undefined ? { env: { ...process.env, ...options.env } } : {}),
+      ...(options.shell   !== undefined ? { shell: options.shell }     : {}),
+      ...(options.signal  !== undefined ? { signal: options.signal }   : {}),
+    };
     try {
-      const { stdout, stderr } = await execFileAsync(program!, args, {
-        ...(options.cwd !== undefined ? { cwd: options.cwd } : {}),
-        ...(options.timeout !== undefined ? { timeout: options.timeout } : {}),
-        ...(options.env !== undefined
-          ? { env: { ...process.env, ...options.env } }
-          : {}),
-      });
+      // shell: true — pass the full command string (enables pipes, redirects, globs).
+      // shell: false/absent — split into program + args (no shell expansion).
+      let stdout: string;
+      let stderr: string;
+      if (options.shell) {
+        ({ stdout, stderr } = await execFileAsync(command, spreadOpts));
+      } else {
+        const [program, ...args] = command.split(" ");
+        ({ stdout, stderr } = await execFileAsync(program!, args, spreadOpts));
+      }
       return { stdout, stderr, exitCode: 0 };
     } catch (err: unknown) {
-      const execErr = err as { stdout?: string; stderr?: string; code?: number };
+      // Catches process errors (non-zero exit), timeout errors, and AbortErrors.
+      // AbortErrors must be caught here and returned as an error result — never thrown.
+      const execErr = err as { stdout?: string; stderr?: string; code?: unknown };
       return {
         stdout: execErr.stdout ?? "",
         stderr: execErr.stderr ?? "",
-        exitCode: execErr.code ?? 1,
+        exitCode: typeof execErr.code === "number" ? execErr.code : 1,
       };
     }
   }

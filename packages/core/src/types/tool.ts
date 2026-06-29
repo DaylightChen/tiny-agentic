@@ -3,15 +3,18 @@ import type { Platform } from "./platform.js";
 
 /**
  * Extensible context object passed to every Tool.call invocation.
- * Empty in M1. The SDK widens this via TypeScript declaration merging
- * to add skillRegistry, commandRegistry, etc.
- *
  * Declared as an interface (not type) to enable declaration merging.
- * Do not add fields here without a corresponding SDK-layer need.
+ *
+ * Two kinds of fields live here:
+ *   - Core-layer fields (e.g. `signal`) — populated by agentLoop inside the
+ *     core package. Add these here when the core loop needs to thread data
+ *     into tools.
+ *   - SDK-layer fields (e.g. skillRegistry, commandRegistry) — added via
+ *     declaration merging in the SDK package, populated by the SDK runtime.
+ *     Do not add SDK-layer fields here.
  */
-// eslint-disable-next-line @typescript-eslint/no-empty-object-type -- intentional open extension point; the SDK widens it via declaration merging
 export interface ToolCallContext {
-  // Reserved for SDK extension.
+  signal?: AbortSignal;  // populated by agentLoop; tools forward to Platform.exec
 }
 
 /**

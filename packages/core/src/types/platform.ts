@@ -2,6 +2,8 @@ export type ExecOptions = {
   cwd?: string;
   timeout?: number;   // milliseconds
   env?: Record<string, string>;
+  shell?: boolean;       // if true, use system shell (/bin/sh on Unix)
+  signal?: AbortSignal;  // forward to execFile for abort support
 };
 
 export type ExecResult = {
