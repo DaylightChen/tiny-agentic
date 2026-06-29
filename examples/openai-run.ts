@@ -9,7 +9,15 @@
  * Not run in CI — requires a real OpenAI API key.
  */
 
-import { Agent, readFileTool, writeFileTool, type Message } from "tiny-agentic";
+import {
+  Agent,
+  readFileTool,
+  writeFileTool,
+  bashTool,
+  editFileTool,
+  type Message,
+  type ApprovalHandler,
+} from "tiny-agentic";
 import { OpenAIProvider } from "tiny-agentic/providers/openai";
 import { NodePlatform } from "tiny-agentic/platform/node";
 import { collectText } from "tiny-agentic/utils";
@@ -29,7 +37,7 @@ const provider = new OpenAIProvider({
   // Any currently-valid Chat Completions model id works here, including reasoning
   // models (o-series / GPT-5) — `maxTokens` maps to `max_completion_tokens`, which
   // reasoning models require. "gpt-4o-mini" is a cheap choice for a throwaway example.
-  model: process.env["OPENAI_MODEL"] ?? "gpt-4o-mini",
+  model: "gpt-4o-mini",
   logger: (entry) => {
     if (entry.event === "request_sent") {
       console.error(`[provider] request sent (${entry.request.messages.length} messages, ${entry.request.tools.length} tools)`);
@@ -99,6 +107,66 @@ for await (const event of agent.run(
     case "turn_complete": console.log(`[turn ${event.turnIndex} complete]`); break;
     case "agent_done": console.log("\n[agent done]"); break;
     case "agent_error": console.error("\n[agent error]", event.error.message); process.exit(1); break;
+  }
+}
+
+// --- Turn 4: agent tooling (bash + edit_file + permission gate) ---
+console.log("\n=== Turn 4: Agent tooling (bash, edit_file, approvalHandler) ===");
+
+// Permission gate: deny destructive shell commands, allow everything else.
+// Demonstrates the approvalHandler seam — remove it to let every call through.
+const approvalHandler: ApprovalHandler = async (toolName, input) => {
+  const command = toolName === "bash" ? String((input as { command?: unknown }).command ?? "") : "";
+  if (toolName === "bash" && /\b(rm|sudo|mkfs|dd)\b/.test(command)) {
+    console.log(`\n[approvalHandler] DENY ${toolName}: ${command}`);
+    return "deny";
+  }
+  console.log(`\n[approvalHandler] allow ${toolName}`);
+  return "allow";
+};
+
+const toolAgent = new Agent({
+  provider,
+  tools: [bashTool, editFileTool, readFileTool, writeFileTool],
+  platform: new NodePlatform(),
+  systemPrompt:
+    "You are a coding assistant. Use the provided tools to complete file and shell tasks. Keep responses concise.",
+  maxTurns: 12,
+  approvalHandler,
+});
+
+const demoFile = "/tmp/tiny-agentic-demo.txt";
+for await (const event of toolAgent.run(
+  `Complete these steps in order, using your tools:
+1. Create the file "${demoFile}" containing exactly: hello
+2. Use edit_file to replace "hello" with "hello world" in that file.
+3. Run a bash command to print the file's contents.
+4. Finally, try to delete it with: rm ${demoFile}
+   If that step is denied, report that it was denied and stop.`,
+)) {
+  switch (event.type) {
+    case "text_delta":
+      process.stdout.write(event.text);
+      break;
+    case "tool_use_start":
+      console.log(`\n[calling: ${event.toolName}(${JSON.stringify(event.toolInput).slice(0, 120)})]`);
+      break;
+    case "tool_result":
+      console.log(`[result: isError=${event.isError}, result=${JSON.stringify(event.result).slice(0, 120)}]`);
+      break;
+    case "turn_complete":
+      console.log(`[turn ${event.turnIndex} complete]`);
+      break;
+    case "agent_done":
+      console.log("\n[agent done]");
+      break;
+    case "agent_error":
+      console.error("\n[agent error]", event.error.message);
+      process.exit(1);
+      break;
+    case "max_turns_exceeded":
+      console.error("\n[max turns exceeded]");
+      break;
   }
 }
 
