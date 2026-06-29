@@ -23,4 +23,4 @@
 - **Iterations:** 1 (implement → verify → review, all green).
 - **Verification (orchestrator, Node v22.22.0):** build→0; `pnpm -r typecheck`→0; `pnpm -r test`→91/91; no-key smoke `pnpm tsx examples/basic-run.ts` → required-key error + exit 1 (proves resolution; no network).
 - **Acceptance criteria:** CI-observable criteria covered by the unit suite (91 tests) + lint + typecheck; runtime criteria (basic / multi-turn / tool-use / collectText) observable via `ANTHROPIC_API_KEY=… pnpm example` (developer-run, not CI).
-- **Commit:** _(filled after commit lands)_
+- **Commit:** `9f019fb` — "Task 10 (Opus redo): integration example (examples/basic-run.ts)"

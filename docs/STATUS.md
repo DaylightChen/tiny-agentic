@@ -19,7 +19,7 @@ project
 - `plan` approved (Opus refine, commit `80de5e0`): `docs/plan/implementation-plan.md` + 10 refined briefs.
 
 ## What's Next
-- Opus dev-loop on **task 10** (the final task: `examples/basic-run.ts` real-API integration driver — model `claude-opus-4-8`, multi-turn, tool use; verifies all 18 success criteria are observable). Then run `/phased-dev:advance-phase` to finalize the implement phase. Auto-proceeding.
+- **All 10 tasks complete (Opus redo).** Run `/phased-dev:advance-phase` to finalize the `implement` phase. M1 core package is functionally complete: 91 unit tests green, typecheck/lint/build clean under Node 22; the integration example is developer-runnable with an API key.
 
 > Note: built-in file tools gained optional line-range params (`read_file` offset/limit; `write_file` offset/limit range-replace) in task 08 — a user-requested scope addition (see `docs/decisions.md`).
 
@@ -36,7 +36,7 @@ project
 | 07 | task-07-loop-runtools | done (`6918f03`) |
 | 08 | task-08-agent-and-index | done (`2cdf170`) |
 | 09 | task-09-lint-and-boundary-verification | done (`a76ef22`) |
-| 10 | task-10-integration-example | in progress |
+| 10 | task-10-integration-example | done (`9f019fb`) |
 
 ## Blockers
 None
