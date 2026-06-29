@@ -16,3 +16,6 @@ export type { Platform, ExecOptions, ExecResult } from "./types/platform.js";
 
 export { readFileTool } from "./tools/builtin/readFile.js";
 export { writeFileTool } from "./tools/builtin/writeFile.js";
+export { bashTool } from "./tools/builtin/bash.js";
+export { editFileTool } from "./tools/builtin/editFile.js";
+export type { ApprovalDecision, ApprovalHandler } from "./types/tool.js";

@@ -56,6 +56,7 @@ export class Agent {
         systemPrompt,
         maxTurns: this.maxTurns,
         signal: abortCtrl.signal,
+        ...(this.approvalHandler !== undefined ? { approvalHandler: this.approvalHandler } : {}),
       });
     } finally {
       // If the consumer breaks out of the for-await loop, JS invokes the

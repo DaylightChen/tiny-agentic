@@ -19,9 +19,9 @@ export type LoopParams = {
 };
 
 export async function* agentLoop(params: LoopParams): AsyncGenerator<AgentEvent, Terminal> {
-  const { provider, registry, platform, systemPrompt, maxTurns, signal } = params;
+  const { provider, registry, platform, systemPrompt, maxTurns, signal, approvalHandler } = params;
   const workingMessages = params.messages; // mutable local copy
-  const context: ToolCallContext = {};
+  const context: ToolCallContext = { signal };
   const toolSchemas = registry.toSchemas();
   let turnIndex = 0;
   let turnsUsed = 0;
@@ -89,7 +89,7 @@ export async function* agentLoop(params: LoopParams): AsyncGenerator<AgentEvent,
     if (pendingToolUses.length > 0) {
       const toolResultBlocks: ContentBlock[] = [];
 
-      for await (const toolEvent of runTools(pendingToolUses, registry, platform, context)) {
+      for await (const toolEvent of runTools(pendingToolUses, registry, platform, context, approvalHandler)) {
         yield toolEvent; // { type: "tool_result", ... }
         if (toolEvent.type === "tool_result") {
           // Serialize defensively. A successful tool can still return an
