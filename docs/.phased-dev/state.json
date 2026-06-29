@@ -1,5 +1,5 @@
 {
   "schemaVersion": 1,
-  "activeScope": "feature/openai-provider",
-  "scopes": ["project", "feature/openai-provider"]
+  "activeScope": "feature/agent-tooling",
+  "scopes": ["project", "feature/openai-provider", "feature/agent-tooling"]
 }
