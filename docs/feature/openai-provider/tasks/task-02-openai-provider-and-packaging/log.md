@@ -47,4 +47,9 @@ Running `examples/openai-run.ts` against a live OpenAI-compatible endpoint surfa
 - **Root cause (systematic-debugging, evidence-backed):** `ToolRegistry.toSchemas()` serialized with `zod-to-json-schema` `target: "openApi3"`, which emits Draft-4 **boolean** `exclusiveMinimum: true`. OpenAI's metaschema requires a **number**. Anthropic tolerated the boolean form, so M1 never caught it; mock-SDK tests don't validate against a real metaschema. (Checked all targets: `jsonSchema7` → numeric ✓; `openAi` → still boolean + `anyOf/null` ✗.)
 - **Escalated** to the user (cross-boundary: core code + a locked M1 decision + the shared Anthropic path). User approved the **core fix**.
 - **Fix:** `registry.ts` → `target: "jsonSchema7"` + strip top-level `$schema`. Numeric `exclusiveMinimum: 0`, accepted by both providers; fixes all tools, not just built-ins. Superseded the 2026-06-27 decision in `docs/project/decisions.md`. Added a regression test in `env-context.test.ts` (failing pre-fix: `expected true to be +0`; passing post-fix).
-- **Verification:** full suite **140 passed (140)** (139 + 1 regression), typecheck exit 0. Real-API re-run of both `examples/openai-run.ts` and `examples/basic-run.ts` is the user's confirmation step.
+- **Verification:** full suite **140 passed (140)** (139 + 1 regression), typecheck exit 0. Real-API re-run of both `examples/openai-run.ts` and `examples/basic-run.ts` confirmed by the user ("looks good").
+
+### Completion
+- **Commits:** core fix `4f4e75b` (`fix(core): tool schemas emit numeric exclusiveMinimum`); feature `aeb387a` (`feat(openai-provider): task 02 …`). Iterations: 1.
+- **Verification evidence:** `pnpm --filter tiny-agentic test` → 140 passed (140); `typecheck` → exit 0; `build` → emits `dist/providers/openai.{js,d.ts}`; live `examples/openai-run.ts` + `examples/basic-run.ts` both succeed.
+- **Regressions:** none.

@@ -8,20 +8,18 @@
 **implement** (not started)
 
 ## Last Completed
-- task-01-openai-mapper — done (`9d0ba4f`), 1 iteration, 124/124 tests green
+- task-02-openai-provider-and-packaging — done (`aeb387a`), 1 iteration; live-verified against OpenAI + Anthropic
+- Core bugfix `4f4e75b`: tool schemas emit numeric `exclusiveMinimum` (jsonSchema7) — surfaced by the example
 
 ## What's Next
-- Run `/phased-dev:start-task 02` to build the `OpenAIProvider` + packaging + `examples/openai-run.ts`
+- **All tasks complete.** Run `/phased-dev:advance-phase` to finalize the `implement` phase (terminal phase → feature workflow complete).
 
 ## Task Progress
 
 | # | Task | Status |
 |---|------|--------|
 | 01 | task-01-openai-mapper | done (`9d0ba4f`) |
-| 02 | task-02-openai-provider-and-packaging | in progress |
-
-## Task Progress
-_(appears after the `plan` phase produces task briefs)_
+| 02 | task-02-openai-provider-and-packaging | done (`aeb387a`) |
 
 ## Blockers
 None
