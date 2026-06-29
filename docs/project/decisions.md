@@ -221,7 +221,9 @@ Dependency direction is strictly one-way: UI → SDK → core. Lower layers neve
 
 ---
 
-## 2026-06-27 — ToolSchema JSON Schema target: openApi3 via zod-to-json-schema
+## 2026-06-27 — ToolSchema JSON Schema target: openApi3 via zod-to-json-schema  ⚠️ SUPERSEDED 2026-06-29
+
+> **Superseded** by "ToolSchema JSON Schema target: jsonSchema7 (openApi3 reverted)" below — the "both APIs accept OpenAPI 3 shapes" assumption was disproven by a live OpenAI 400.
 
 **Phase:** engineering
 
@@ -230,6 +232,18 @@ Dependency direction is strictly one-way: UI → SDK → core. Lower layers neve
 **Rationale:** The `openApi3` target produces cleaner schemas (no `$schema` header, simpler nullable representation) than JSON Schema 7. Both the Anthropic Messages API and the OpenAI Chat Completions API accept OpenAPI 3 JSON Schema shapes in their tool definitions. `$refStrategy: "none"` inlines all `$ref` definitions, which providers require (they do not resolve `$ref`s).
 
 **Consequences:** `zod-to-json-schema` is a direct dependency of the core package (not a peer dependency). Consumers do not call it directly; they write Zod schemas and the framework serializes them.
+
+---
+
+## 2026-06-29 — ToolSchema JSON Schema target: jsonSchema7 (openApi3 reverted)
+
+**Phase:** implement (feature/openai-provider, task 02 — surfaced during manual verification)
+
+**Decision:** Serialize tool input schemas with `zodToJsonSchema(schema, { target: "jsonSchema7", $refStrategy: "none" })`, then `delete` the top-level `$schema` key. Supersedes the 2026-06-27 `openApi3` decision above.
+
+**Rationale:** The `openApi3` target emits Draft-4-style **boolean** `exclusiveMinimum: true` (with a sibling `minimum`). OpenAI's function-parameters metaschema requires `exclusiveMinimum` to be a **number** and rejects the boolean form with a 400 (`"True is not of type 'number'"`) — hit live by `examples/openai-run.ts` on the `read_file` tool's `offset: z.number().int().positive()`. The earlier decision's claim that "both APIs accept OpenAPI 3 shapes" was wrong: Anthropic tolerates the boolean form, OpenAI does not, and the mock-SDK tests never validated against a real metaschema. `jsonSchema7` emits the numeric Draft-7 form (`exclusiveMinimum: 0`) that **both** providers accept. The `openAi` target (this `zod-to-json-schema` version) was also rejected — it still emits the boolean form and adds an `anyOf`/`null` wrapper. Stripping `$schema` preserves the "clean, no draft marker" property the original decision valued.
+
+**Consequences:** Fixes every tool (built-in and user-authored) that uses numeric constraints (`.positive()`, `.gt()`, `.min()`, etc.), not just the built-ins. The Anthropic path now also receives `jsonSchema7` output (standard JSON Schema it already accepts; for the built-in tools the only difference is the numeric `exclusiveMinimum`). Regression guard added in `env-context.test.ts` asserting a numeric `exclusiveMinimum`. A class of bug invisible to mock-SDK tests — real-API smoke runs (`examples/*-run.ts`) remain the way to catch metaschema mismatches.
 
 ---
 

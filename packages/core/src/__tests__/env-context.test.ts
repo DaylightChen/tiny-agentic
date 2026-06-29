@@ -148,7 +148,7 @@ describe("ToolRegistry", () => {
     expect(registry.findByName("nope")).toBeUndefined();
   });
 
-  it("toSchemas serializes the Zod inputSchema to an openApi3 object schema", () => {
+  it("toSchemas serializes the Zod inputSchema to a clean JSON-Schema object", () => {
     const registry = new ToolRegistry([readTool]);
     const schemas = registry.toSchemas();
 
@@ -165,7 +165,26 @@ describe("ToolRegistry", () => {
     expect(schema.inputSchema.properties.path).toBeDefined();
     expect((schema.inputSchema.properties.path as { type: string }).type).toBe("string");
 
-    // openApi3 target omits the $schema draft marker.
+    // The $schema draft marker is stripped (kept clean for both providers).
     expect((schema.inputSchema as Record<string, unknown>).$schema).toBeUndefined();
+  });
+
+  it("serializes numeric constraints with a NUMERIC exclusiveMinimum (OpenAI metaschema compatibility)", () => {
+    // Regression: the openApi3 target emitted `exclusiveMinimum: true` (a boolean,
+    // OpenAPI-3.0/Draft-4 style), which OpenAI's function-parameters validator rejects
+    // ("True is not of type 'number'"). The serialized schema must use the numeric
+    // (Draft-7+) form, which both the Anthropic and OpenAI APIs accept.
+    const numTool = defineTool({
+      name: "ranged",
+      description: "A tool with a positive integer.",
+      inputSchema: z.object({ offset: z.number().int().positive() }),
+      call: async () => null,
+    });
+    const [schema] = new ToolRegistry([numTool]).toSchemas();
+    if (!schema) throw new Error("expected one serialized schema");
+
+    const offset = schema.inputSchema.properties.offset as Record<string, unknown>;
+    expect(offset.exclusiveMinimum).toBe(0);
+    expect(typeof offset.exclusiveMinimum).toBe("number");
   });
 });

@@ -14,13 +14,23 @@ export class ToolRegistry {
   }
 
   toSchemas(): ToolSchema[] {
-    return Array.from(this.byName.values()).map((tool) => ({
-      name: tool.name,
-      description: tool.description,
-      inputSchema: zodToJsonSchema(tool.inputSchema, {
-        target: "openApi3",
-        $refStrategy: "none", // inline all refs for Anthropic compatibility
-      }) as ToolSchema["inputSchema"],
-    }));
+    return Array.from(this.byName.values()).map((tool) => {
+      // jsonSchema7 (not openApi3): the openApi3/Draft-4 target emits boolean
+      // `exclusiveMinimum: true`, which OpenAI's function-parameters metaschema
+      // rejects ("True is not of type 'number'"). jsonSchema7 emits the numeric
+      // Draft-7 form (`exclusiveMinimum: 0`) that BOTH Anthropic and OpenAI accept.
+      // $refStrategy: "none" inlines all refs (providers do not resolve $ref).
+      const json = zodToJsonSchema(tool.inputSchema, {
+        target: "jsonSchema7",
+        $refStrategy: "none",
+      }) as Record<string, unknown>;
+      // Strip the draft marker — providers don't need it, and it keeps schemas clean.
+      delete json["$schema"];
+      return {
+        name: tool.name,
+        description: tool.description,
+        inputSchema: json as ToolSchema["inputSchema"],
+      };
+    });
   }
 }
