@@ -21,4 +21,4 @@
 - **Iterations:** 1 (verify only; no fixes).
 - **CI commands (enforcement):** `pnpm -r typecheck` (7.10) · `pnpm lint` (7.11/7.12) · `pnpm -r test` (7.1–7.9, 7.13–7.18) · `pnpm -r build` (distributable).
 - **Acceptance criteria:** 7.10, 7.11, 7.12 all green; full suite 91/91. **Code changes:** none. **Regressions:** none.
-- **Commit:** _(filled after commit lands)_
+- **Commit:** `a76ef22` — "Task 09 (Opus redo): lint + boundary verification (7.10/7.11/7.12 green)"
