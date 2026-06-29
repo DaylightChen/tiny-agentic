@@ -32,6 +32,7 @@
 
 ### Review
 - **Verdict:** ✅ Approved (no issues to fix).
+- **Completion → Commit:** `9d0ba4f` — "feat(openai-provider): task 01 — OpenAI stream mapper". Iterations: 1. Verification: `pnpm --filter tiny-agentic test` → 124 passed (124); `pnpm --filter tiny-agentic typecheck` → exit 0.
 - **Criteria check:** all pass — exports match §Downstream signatures (`mapRequest` returns body with no `stream` flag; `ToolCallAccumulator` `applyDelta`/`setFinishReason`/`flush`; `translateChunk` text-only); system message first + `max_completion_tokens` present / `max_tokens` absent; `arguments` = `JSON.stringify(input)` string; batched `tool_result` → N ordered `role:"tool"` msgs, `is_error` dropped; empty tools → no `tools` key; accumulator keys on index, flush sorts ascending + exactly one `message_stop`; parse-error → `{ input:{}, inputParseError:true }` (never null); no-finish-reason → `"end_turn"`; `include_usage` → `[]`; no runtime SDK import. Reviewer independently re-ran `tsc --noEmit` (exit 0) + eslint (exit 0) + both grep checks.
 - **Code quality findings:** clean — faithfully mirrors `anthropic-mapper.ts` guards + parse-error contract; local structural types justified and sound. No DRY/YAGNI issues.
 - **Test quality findings:** adequate/strong — value-level assertions, no tautologies, consume-then-flush helper matches the live provider loop.

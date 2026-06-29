@@ -7,11 +7,11 @@
 ## Install
 
 ```bash
-npm install tiny-agentic zod @anthropic-ai/sdk
+npm install tiny-agentic zod @anthropic-ai/sdk   # add `openai` instead/as well for the OpenAI provider
 ```
 
 - `zod` is a **required** peer dependency — you author tool schemas with it.
-- `@anthropic-ai/sdk` is an **optional** peer dependency — needed only if you use the built-in Anthropic provider.
+- `@anthropic-ai/sdk` and `openai` are **optional** peer dependencies — install only the SDK(s) for the provider(s) you use (`@anthropic-ai/sdk` for `AnthropicProvider`, `openai` for `OpenAIProvider`).
 - Requires **Node >= 22**. ESM only.
 
 ## Quick start
@@ -51,6 +51,7 @@ The package ships several entry points so an OpenAI-only consumer never loads th
 |--------|---------|
 | `tiny-agentic` | `Agent`, `defineTool`, `readFileTool`, `writeFileTool`, and all types (`Tool`, `ToolCallContext`, `Provider`, `ProviderRequest`, `ProviderEvent`, `ToolSchema`, `Logger`, `LogEntry`, `Platform`, `ExecOptions`, `ExecResult`, `Message` + content blocks, `AgentEvent`, `Terminal`, `AgentOptions`, `RunOptions`) |
 | `tiny-agentic/providers/anthropic` | `AnthropicProvider` |
+| `tiny-agentic/providers/openai` | `OpenAIProvider` |
 | `tiny-agentic/platform/node` | `NodePlatform` |
 | `tiny-agentic/utils` | `collectText`, `collectEvents` |
 
@@ -111,9 +112,10 @@ The framework serializes the Zod schema to JSON Schema for the model, validates 
 
 ### Provider
 
-`AnthropicProvider` calls the Anthropic Messages API and translates its streaming events into the canonical `ProviderEvent` shape. Retry of transient errors (429/5xx) is delegated to the Anthropic SDK via `maxRetries`.
+Two providers ship in the box, both translating their vendor's streaming events into the canonical `ProviderEvent` shape. Both delegate retry of transient errors (429/5xx) to their vendor SDK via `maxRetries`, and share a field-for-field options shape, so swapping backends is a one-line change:
 
 ```ts
+import { AnthropicProvider } from "tiny-agentic/providers/anthropic";
 new AnthropicProvider({
   apiKey,                 // required
   model,                  // required
@@ -122,9 +124,19 @@ new AnthropicProvider({
   maxTokens,              // optional (default 32000)
   logger,                 // optional: (entry: LogEntry) => void — off by default
 });
+
+import { OpenAIProvider } from "tiny-agentic/providers/openai";
+new OpenAIProvider({
+  apiKey,                 // required
+  model,                  // required (any Chat Completions model id, incl. o-series / GPT-5)
+  maxRetries,             // optional (default 3)
+  baseURL,                // optional — also targets OpenAI-compatible endpoints
+  maxTokens,              // optional (default 32000) — sent as max_completion_tokens
+  logger,                 // optional
+});
 ```
 
-Implement the `Provider` interface (`stream(request, signal?): AsyncGenerator<ProviderEvent>`) to add another backend.
+`OpenAIProvider` targets the **Chat Completions API**; `maxTokens` is mapped to `max_completion_tokens` so reasoning models work unchanged. (Azure OpenAI's distinct client is out of scope — use `baseURL` for generic OpenAI-compatible endpoints.) Implement the `Provider` interface (`stream(request, signal?): AsyncGenerator<ProviderEvent>`) to add another backend.
 
 ### Platform
 
@@ -149,7 +161,7 @@ const { events, terminal } = await collectEvents(agent.run("…")); // full even
 
 ## What this package is not (M1 scope)
 
-No permissions/approval flow, sub-agents, skills, slash-commands, session persistence, OpenAI provider, or UI — those are future milestones or separate layers. The agent loop is sequential (tools run one at a time) with a seam for future concurrency.
+No permissions/approval flow, sub-agents, skills, slash-commands, session persistence, or UI — those are future milestones or separate layers. The agent loop is sequential (tools run one at a time) with a seam for future concurrency.
 
 ## License
 

@@ -31,8 +31,8 @@
       ]
     }
   ],
-  "currentPhase": "research",
-  "phaseStatus": "complete_awaiting_approval",
+  "currentPhase": "implement",
+  "phaseStatus": "not_started",
   "paths": {
     "researchDir": "docs/feature/openai-provider/research/",
     "engineeringDir": "docs/feature/openai-provider/engineering/",
@@ -40,5 +40,9 @@
     "tasks": "docs/feature/openai-provider/tasks/",
     "decisions": "docs/feature/openai-provider/decisions.md"
   },
-  "history": []
+  "history": [
+    { "phase": "research", "completedAt": "2026-06-29T00:00:00Z", "approvedAt": "2026-06-29T00:00:00Z", "note": "OpenAI provider research approved. Output: research/2026-06-29-openai-provider-research.md. Four forks locked in decisions.md: Chat Completions API (not Responses), tool-result errors ride in content string (drop is_error), default maxRetries=3 (match Anthropic), expose baseURL (Azure AzureOpenAI out of scope)." },
+    { "phase": "engineering", "completedAt": "2026-06-29T00:00:00Z", "approvedAt": "2026-06-29T00:00:00Z", "note": "Engineering spec approved: engineering/2026-06-29-openai-provider-engineering.md. Modules: new providers/openai.ts + openai-mapper.ts + tests; edits to package.json (optional openai peer dep + ./providers/openai sub-path) and tsup.config.ts; index.ts unchanged. Raw-chunk streaming, flush-at-stream-end accumulator keyed on tool_calls[].index, four request transforms, max_completion_tokens. Two more decisions locked: system role for all models; maxTokens default 32000. Residual #3 (openai peer-dep version range) deferred to implement time." },
+    { "phase": "plan", "completedAt": "2026-06-29T00:00:00Z", "approvedAt": "2026-06-29T00:00:00Z", "note": "Plan approved: plan/implementation-plan.md + 2 task briefs. task-01-openai-mapper (mapper in isolation, fixture tests) → task-02-openai-provider-and-packaging (provider class + package.json peer-dep/export + tsup entry, mock-SDK tests). Planner flagged openai is 6.x not 4.x (pin ^6.0.0 at implement) and that chat.completions.create is Promise-returning (must await before iterating)." }
+  ]
 }

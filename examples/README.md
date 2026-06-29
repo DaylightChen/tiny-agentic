@@ -27,3 +27,20 @@ ANTHROPIC_API_KEY=sk-ant-… pnpm example
 - **collectText** — the non-streaming convenience helper.
 
 This package is a workspace member depending on `tiny-agentic: workspace:*`, so the bare `import { Agent } from "tiny-agentic"` specifiers resolve through the pnpm symlink. The model id is set to `claude-opus-4-8`; swap it for a cheaper valid id (e.g. `claude-haiku-4-5`) if you prefer.
+
+## `openai-run.ts`
+
+The OpenAI counterpart to `basic-run.ts` — the same four scenarios (Q&A, multi-turn, `read_file` tool use, `collectText`), built on `OpenAIProvider` from `tiny-agentic/providers/openai`. It demonstrates that the `Provider` seam holds for a different backend with no other code changes.
+
+### Run it
+
+Requires a real OpenAI API key and Node >= 22.
+
+```bash
+# from the repo root
+pnpm install
+pnpm --filter tiny-agentic build      # the example imports the built ./providers/openai entry
+OPENAI_API_KEY=sk-… pnpm tsx examples/openai-run.ts
+```
+
+Without `OPENAI_API_KEY` set, the script prints an error and exits 1 (a token-free way to confirm the wiring resolves). The model id is `gpt-4o-mini`; any valid Chat Completions model works, including reasoning models (o-series / GPT-5), since `maxTokens` maps to `max_completion_tokens`.

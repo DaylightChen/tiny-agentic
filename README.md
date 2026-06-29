@@ -28,7 +28,7 @@ This is a **pnpm monorepo** with a strict one-way dependency rule (`ui → sdk �
 
 | Package | Name | Status |
 |---------|------|--------|
-| [`packages/core`](packages/core) | `tiny-agentic` | **Milestone 1 — implemented.** The headless engine: agent loop, tool registry, provider abstraction, platform interface, env context, typed event stream. |
+| [`packages/core`](packages/core) | `tiny-agentic` | **Milestone 1 — implemented** (+ OpenAI provider). The headless engine: agent loop, tool registry, provider abstraction (Anthropic + OpenAI), platform interface, env context, typed event stream. |
 | [`packages/sdk`](packages/sdk) | `tiny-agentic-sdk` | Placeholder. A future batteries-included layer (skills, slash-commands, session persistence) on top of core. |
 | [`packages/ui`](packages/ui) | `tiny-agentic-ui` | Placeholder. A future interactive front-end (TUI/CLI/web) — a pure consumer of the event stream. |
 | [`examples`](examples) | — | Throwaway driver scripts (not published). See [`examples/README.md`](examples/README.md). |
@@ -48,19 +48,20 @@ pnpm -r build           # build packages (tsup)
 pnpm -r test            # run the test suite (vitest)
 pnpm -r typecheck       # tsc --noEmit across all packages
 pnpm lint               # eslint --max-warnings 0 (enforces the headless/boundary rules)
-ANTHROPIC_API_KEY=… pnpm example   # run the integration example (real API; not CI)
+ANTHROPIC_API_KEY=… pnpm example                 # run the Anthropic integration example (real API; not CI)
+OPENAI_API_KEY=… pnpm tsx examples/openai-run.ts  # the OpenAI counterpart
 ```
 
 ## Design principles
 
 - **Headless / UI-free.** The core imports zero UI code and surfaces work as a typed `AsyncGenerator` of events. Any front-end is a separate package on top.
 - **Stateless core.** `Agent.run()` holds no memory between calls; multi-turn is achieved by threading the message list. Persistence is an SDK-layer concern.
-- **Provider abstraction.** A canonical request/event shape with per-provider adapters (Anthropic in M1; OpenAI planned). The reference is Anthropic-shaped throughout; this framework abstracts it.
+- **Provider abstraction.** A canonical request/event shape with per-provider adapters (**Anthropic and OpenAI both ship in `core`**, behind matching options). The reference is Anthropic-shaped throughout; this framework abstracts it so a backend swap is a one-line change.
 - **Platform injection.** All environment access (`fs`, `process`, `child_process`) is behind a `Platform` interface — only `NodePlatform` touches Node globals — so the core is environment-agnostic.
 
 ## Documentation
 
-The full design lives under [`docs/`](docs): product design (`brainstorm/`), architecture (`engineering/`), the implementation plan (`plan/`), per-task logs (`tasks/`), and the decision log (`decisions.md`). Project status is mirrored in [`docs/STATUS.md`](docs/STATUS.md).
+The full design lives under [`docs/`](docs). The project scope is under [`docs/project/`](docs/project): product design (`brainstorm/`), architecture (`engineering/`), the implementation plan (`plan/`), per-task logs (`tasks/`), and the decision log (`decisions.md`); status is mirrored in [`docs/project/STATUS.md`](docs/project/STATUS.md). Feature scopes live under [`docs/feature/<name>/`](docs/feature) (e.g. the OpenAI provider work in [`docs/feature/openai-provider/`](docs/feature/openai-provider)).
 
 ## License
 

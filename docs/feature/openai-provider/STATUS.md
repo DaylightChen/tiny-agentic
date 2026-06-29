@@ -5,14 +5,20 @@
 > The machine-readable source of truth is `docs/.phased-dev/scopes/feature/openai-provider.json`.
 
 ## Current Phase
-**research** (complete — awaiting approval)
+**implement** (not started)
 
 ## Last Completed
-- `research` findings written: `docs/feature/openai-provider/research/2026-06-29-openai-provider-research.md`
+- task-01-openai-mapper — done (`9d0ba4f`), 1 iteration, 124/124 tests green
 
 ## What's Next
-- Review the research doc, then run `/phased-dev:advance-phase` to move to `engineering`
-- Open fork to settle (research §open-questions): Chat Completions API vs Responses API
+- Run `/phased-dev:start-task 02` to build the `OpenAIProvider` + packaging + `examples/openai-run.ts`
+
+## Task Progress
+
+| # | Task | Status |
+|---|------|--------|
+| 01 | task-01-openai-mapper | done (`9d0ba4f`) |
+| 02 | task-02-openai-provider-and-packaging | in progress |
 
 ## Task Progress
 _(appears after the `plan` phase produces task briefs)_
