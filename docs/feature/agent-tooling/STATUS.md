@@ -5,26 +5,27 @@
 > The machine-readable source of truth is `docs/.phased-dev/scopes/feature/agent-tooling.json`.
 
 ## Current Phase
-**implement** (not started)
+**implement** (complete — awaiting approval)
 
 ## Last Completed
-- `plan` approved (2026-06-29): `docs/feature/agent-tooling/plan/implementation-plan.md` + 5 task briefs.
+- task-05-wiring-and-exports — done (`70bd7b3`), 1 iteration. 196/196 tests, build + typecheck + lint clean. **Feature complete.**
+- task-04-permission-gate — done (`e12fdf4`), 1 iteration.
+- task-03-edit-file-tool — done (`894839a`), 1 iteration.
+- task-02-bash-tool — done (`90225a0`), 1 iteration.
+- task-01-type-and-platform-foundations — done (`1b58b86`), 2 iterations.
 
 ## What's Next
-- Run `/phased-dev:start-task 01` to begin the per-task dev loop (implement → test → review → fix).
+- All 5 tasks complete. Run `/phased-dev:advance-phase` to finalize the `implement` phase (terminal phase — completes the feature workflow).
 
 ## Task Progress
 
 | # | Task | Status |
 |---|------|--------|
-| 01 | task-01-type-and-platform-foundations | pending |
-| 02 | task-02-bash-tool | pending |
-| 03 | task-03-edit-file-tool | pending |
-| 04 | task-04-permission-gate | pending |
-| 05 | task-05-wiring-and-exports | pending |
-
-## Task Progress
-_(appears after the `plan` phase produces task briefs)_
+| 01 | task-01-type-and-platform-foundations | done (`1b58b86`) |
+| 02 | task-02-bash-tool | done (`90225a0`) |
+| 03 | task-03-edit-file-tool | done (`894839a`) |
+| 04 | task-04-permission-gate | done (`e12fdf4`) |
+| 05 | task-05-wiring-and-exports | done (`70bd7b3`) |
 
 ## Blockers
 None
