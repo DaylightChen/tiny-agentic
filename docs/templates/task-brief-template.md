@@ -11,7 +11,7 @@
 [Exact file paths the agent should read before starting. Not "read the codebase" — the specific files that carry the contracts, conventions, or upstream output this task builds on.]
 
 - `path/to/file.ts` — why it matters
-- `docs/engineering/spec.md#section` — relevant section of the engineering spec
+- `docs/project/engineering/spec.md#section` — relevant section of the engineering spec
 
 ## Downstream dependencies
 

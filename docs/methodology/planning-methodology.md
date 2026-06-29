@@ -32,10 +32,10 @@ Each task must be completable within a single Claude Code session, including all
 
 ## 4. Task Document Structure
 
-Each task lives in its own directory under `docs/tasks/`:
+Each task lives in its own directory under `docs/project/tasks/`:
 
 ```
-docs/tasks/task-NN-name/
+docs/project/tasks/task-NN-name/
 ├── brief.md    # The task plan — written in the plan phase, immutable during the implement phase
 └── log.md      # Execution log — created at implement-phase task start, see execution methodology
 ```

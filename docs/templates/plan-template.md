@@ -1,6 +1,6 @@
 # Implementation Plan — [Project / Feature Name]
 
-> Written in the plan phase by the `planner` agent. Lives at the scope's `paths.plan` (project: `docs/plan/implementation-plan.md`; feature: `docs/features/<name>/plan.md`). The agent should rewrite this skeleton — sections below are the required shape, not boilerplate to preserve.
+> Written in the plan phase by the `planner` agent. Lives at the scope's `paths.plan` (project: `docs/project/plan/implementation-plan.md`; feature: `docs/feature/<name>/plan/implementation-plan.md`). The agent should rewrite this skeleton — sections below are the required shape, not boilerplate to preserve.
 
 ## Goal
 

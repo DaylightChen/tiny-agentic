@@ -1,6 +1,6 @@
 # Execution Log — Task N: [Name]
 
-> Template for `docs/tasks/task-NN-name/log.md`. Copy this file when starting a task. Delete sections that don't apply (e.g., Escalation if none, Iteration 2+ if not needed).
+> Template for `docs/project/tasks/task-NN-name/log.md`. Copy this file when starting a task. Delete sections that don't apply (e.g., Escalation if none, Iteration 2+ if not needed).
 
 ## Iteration 1
 

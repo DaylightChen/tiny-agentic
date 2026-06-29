@@ -7,44 +7,44 @@
     {
       "phase": "research",
       "agent": "researcher",
-      "outputCheck": "docs/research/*.md"
+      "outputCheck": "docs/project/research/*.md"
     },
     {
       "phase": "brainstorm",
       "agent": "brainstormer",
-      "outputCheck": "docs/brainstorm/*.md"
+      "outputCheck": "docs/project/brainstorm/*.md"
     },
     {
       "phase": "engineering",
       "agent": "architect",
-      "outputCheck": "docs/engineering/*.md"
+      "outputCheck": "docs/project/engineering/*.md"
     },
     {
       "phase": "plan",
       "agent": "planner",
       "outputCheck": [
-        "docs/plan/implementation-plan.md",
-        "docs/tasks/task-*/brief.md"
+        "docs/project/plan/implementation-plan.md",
+        "docs/project/tasks/task-*/brief.md"
       ]
     },
     {
       "phase": "implement",
       "agent": null,
       "outputCheck": [
-        "docs/tasks/task-*/brief.md",
-        "docs/tasks/task-*/completion.md"
+        "docs/project/tasks/task-*/brief.md",
+        "docs/project/tasks/task-*/completion.md"
       ]
     }
   ],
   "currentPhase": "implement",
   "phaseStatus": "complete",
   "paths": {
-    "researchDir": "docs/research/",
-    "brainstormDir": "docs/brainstorm/",
-    "engineeringDir": "docs/engineering/",
-    "plan": "docs/plan/implementation-plan.md",
-    "tasks": "docs/tasks/",
-    "decisions": "docs/decisions.md"
+    "researchDir": "docs/project/research/",
+    "brainstormDir": "docs/project/brainstorm/",
+    "engineeringDir": "docs/project/engineering/",
+    "plan": "docs/project/plan/implementation-plan.md",
+    "tasks": "docs/project/tasks/",
+    "decisions": "docs/project/decisions.md"
   },
   "history": [
     { "phase": "research", "completedAt": "2026-06-27T00:00:00Z", "approvedAt": "2026-06-27T00:00:00Z", "note": "Backfilled on 0.4.0→0.5.0 migration; satisfied by pre-existing docs/research/ subsystem map" },

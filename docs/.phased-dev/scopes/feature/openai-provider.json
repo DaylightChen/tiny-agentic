@@ -1,0 +1,44 @@
+{
+  "schemaVersion": 1,
+  "id": "feature/openai-provider",
+  "type": "feature",
+  "name": "openai-provider",
+  "pipeline": [
+    {
+      "phase": "research",
+      "agent": "researcher",
+      "outputCheck": "docs/feature/openai-provider/research/*.md"
+    },
+    {
+      "phase": "engineering",
+      "agent": "feature-architect",
+      "outputCheck": "docs/feature/openai-provider/engineering/*.md"
+    },
+    {
+      "phase": "plan",
+      "agent": "planner",
+      "outputCheck": [
+        "docs/feature/openai-provider/plan/implementation-plan.md",
+        "docs/feature/openai-provider/tasks/task-*/brief.md"
+      ]
+    },
+    {
+      "phase": "implement",
+      "agent": null,
+      "outputCheck": [
+        "docs/feature/openai-provider/tasks/task-*/brief.md",
+        "docs/feature/openai-provider/tasks/task-*/completion.md"
+      ]
+    }
+  ],
+  "currentPhase": "research",
+  "phaseStatus": "complete_awaiting_approval",
+  "paths": {
+    "researchDir": "docs/feature/openai-provider/research/",
+    "engineeringDir": "docs/feature/openai-provider/engineering/",
+    "plan": "docs/feature/openai-provider/plan/implementation-plan.md",
+    "tasks": "docs/feature/openai-provider/tasks/",
+    "decisions": "docs/feature/openai-provider/decisions.md"
+  },
+  "history": []
+}

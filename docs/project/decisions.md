@@ -80,7 +80,7 @@
 
 **Rationale:** This is the smallest *complete* agent — it can actually call a model and do things via tools — while excluding everything the research classified as resilience or product polish. Permissions default to blanket-allow in M1; the approval seam comes later. OpenAI is the M2 validation of the provider abstraction.
 
-**Consequences:** Defines the boundary of the first engineering spec and plan. Subsystem research lives in `docs/research/` (see `00-overview.md` minimal-essence table) and is the primary input to the brainstorm spec.
+**Consequences:** Defines the boundary of the first engineering spec and plan. Subsystem research lives in `docs/project/research/` (see `00-overview.md` minimal-essence table) and is the primary input to the brainstorm spec.
 
 ---
 
@@ -368,7 +368,7 @@ An empty-object `input` plus a boolean flag keeps the persisted history valid on
 
 ---
 
-_See `docs/research/` for the subsystem analysis underpinning these decisions._
+_See `docs/project/research/` for the subsystem analysis underpinning these decisions._
 
 ---
 

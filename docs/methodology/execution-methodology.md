@@ -43,7 +43,7 @@ The dev loop is bounded at **5 iterations**. If iteration 5 ends without reviewe
 
 - **Revise the brief** — the planner's spec for this task may be wrong
 - **Revise upstream design** — the engineering spec / UX spec may be wrong
-- **Defer to `docs/known-issues.md`** and proceed (only acceptable for non-blocking issues)
+- **Defer to `docs/project/known-issues.md`** and proceed (only acceptable for non-blocking issues)
 - **Force-approve and commit** — only if the user explicitly decides the recurring finding is bikeshedding
 
 See §3 for the escalation protocol.
@@ -79,7 +79,7 @@ Not every agent needs the same amount of context. The task document serves all t
 |-------|---------------|
 | **Implementer** | Goal, context files, steps, downstream dependencies. Knows what it's building, what contracts to honor, and what later tasks depend on. |
 | **Tester** | Goal, acceptance criteria, downstream dependencies, output files. Knows what to verify, what integration points to protect, and what invariants downstream tasks assume. |
-| **Reviewer** | Everything above, plus the **full implementation plan** (`docs/plan/`). The reviewer is the only agent that sees the big picture. Its job is to catch decisions that satisfy this task but create problems for later tasks. |
+| **Reviewer** | Everything above, plus the **full implementation plan** (`docs/project/plan/`). The reviewer is the only agent that sees the big picture. Its job is to catch decisions that satisfy this task but create problems for later tasks. |
 
 ### 2.3 Handoff Protocol
 
@@ -118,10 +118,10 @@ Evidence (actual command output) is required before claiming success. "It should
 
 ## 5. Task Directory Structure
 
-Each task lives in its own directory under `docs/tasks/`:
+Each task lives in its own directory under `docs/project/tasks/`:
 
 ```
-docs/tasks/task-NN-name/
+docs/project/tasks/task-NN-name/
 ├── brief.md    # The task plan (goal, steps, criteria) — immutable during execution
 └── log.md      # Execution log — created at task start, filled during implementation
 ```
