@@ -8,9 +8,9 @@
 project
 
 ## Current Phase
-**implement** (not started — Opus redo)
+**implement** (complete) — ✅ **Milestone 1 DONE**
 
-> **Opus refine pass (2026-06-27 → 06-28):** the scope was rewound from `implement` to `brainstorm` and re-run through brainstorm → engineering → plan with all phased-dev agents pinned to Opus, each phase orchestrator-self-reviewed. Git history preserved (Sonnet implement work tagged `sonnet-run-checkpoint`). Now redoing `implement` tasks 01→10 with the Opus dev-loop against the refined briefs. The prior Sonnet task-01/02 completion marker + logs were removed for a clean redo.
+> **M1 complete (2026-06-29).** The `tiny-agentic` core package is functionally done: all 10 implement tasks landed via the Opus dev-loop (implement → test → review), each with `brief.md` + `completion.md`. Final state under Node 22: **91 unit tests green**, `typecheck` / `lint` / `build` clean. `implement` is the terminal phase, so the project-scope workflow is complete. Git history preserved throughout (the earlier Sonnet run is tagged `sonnet-run-checkpoint`).
 
 ## Last Completed
 - `research` satisfied (2026-06-27, backfilled). Output: `docs/research/` subsystem map.
@@ -19,7 +19,8 @@ project
 - `plan` approved (Opus refine, commit `80de5e0`): `docs/plan/implementation-plan.md` + 10 refined briefs.
 
 ## What's Next
-- **All 10 tasks complete (Opus redo).** Run `/phased-dev:advance-phase` to finalize the `implement` phase. M1 core package is functionally complete: 91 unit tests green, typecheck/lint/build clean under Node 22; the integration example is developer-runnable with an API key.
+- **M1 is complete — the project-scope pipeline is finished.** Possible next steps (would each be a new scope/milestone, not part of M1): M2 provider work (OpenAI; Bedrock/Vertex behind the existing `Provider` abstraction), the permission seam, or starting the SDK layer (`packages/sdk`). Use `/phased-dev:start-feature` for feature work or open a new milestone when ready.
+- Developer-run integration check remains available: `ANTHROPIC_API_KEY=… pnpm example`.
 
 > Note: built-in file tools gained optional line-range params (`read_file` offset/limit; `write_file` offset/limit range-replace) in task 08 — a user-requested scope addition (see `docs/decisions.md`).
 
