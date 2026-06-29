@@ -5,14 +5,17 @@
 > The machine-readable source of truth is `docs/.phased-dev/scopes/feature/openai-provider.json`.
 
 ## Current Phase
-**implement** (not started)
+**implement** (complete) — ✅ **Feature DONE**
+
+> **Feature complete (2026-06-29).** `OpenAIProvider` ships in `core` behind the existing `Provider` seam — the M2 proof that a genuinely different backend drops in with no changes to the project's contracts. Both tasks landed via the Opus dev loop (1 iteration each), live-verified against OpenAI + Anthropic. A core M1 schema bug (boolean `exclusiveMinimum`) surfaced during manual verification and was fixed in core (`4f4e75b`). `implement` is the terminal phase, so this feature scope's workflow is complete.
 
 ## Last Completed
 - task-02-openai-provider-and-packaging — done (`aeb387a`), 1 iteration; live-verified against OpenAI + Anthropic
 - Core bugfix `4f4e75b`: tool schemas emit numeric `exclusiveMinimum` (jsonSchema7) — surfaced by the example
+- `implement` phase finalized (2026-06-29) — feature workflow complete
 
 ## What's Next
-- **All tasks complete.** Run `/phased-dev:advance-phase` to finalize the `implement` phase (terminal phase → feature workflow complete).
+- **Feature complete — nothing pending in this scope.** Switch back with `/phased-dev:switch-scope project`, or start the next feature with `/phased-dev:start-feature <name>`.
 
 ## Task Progress
 
