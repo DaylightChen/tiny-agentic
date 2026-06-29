@@ -381,3 +381,17 @@ _See `docs/research/` for the subsystem analysis underpinning these decisions._
 **Rationale:** The code-architecture skeletons pervasively use leading-underscore names for required-but-unused identifiers — `_ctx` in a `Tool.call` that needs no context, `_req`/`_signal` in `MockProvider.stream`, `_encoding` on `NodePlatform.readFile`. `typescript-eslint`'s recommended `no-unused-vars` has no underscore exception by default, so each such param errored. Adding the ignore patterns once (the conventional setting) is cleaner than dropping/renaming params task-by-task, and preserves call-site self-documentation. Surfaced when task-03's `_encoding` failed lint.
 
 **Consequences:** Tasks 05/07/08 (mock providers, tool calls with unused context) lint cleanly with their `_`-prefixed params. The code-architecture doc's ESLint snippet was updated to match.
+
+---
+
+## 2026-06-28 — Built-in file tools gain optional line-range parameters
+
+**Phase:** implement (task-08, Opus redo) — user-requested scope addition
+
+**Decision:** `read_file` and `write_file` accept optional line-range parameters:
+- `read_file({ path, offset?, limit? })` — `offset` 1-based start line, `limit` max lines. No range → whole file `{ content }`; range → `{ content, offset, lineCount, totalLines, truncated }`.
+- `write_file({ path, content, offset?, limit? })` — no `offset` → full overwrite (create/replace), `{ written, path }`; `offset` set → read-modify-write splice replacing lines `[offset, offset+limit)` (limit default = through EOF, `0` = insert), `{ written, path, replacedFrom, replacedLines }`. Range mode requires an existing file.
+
+**Rationale:** Large files blow up the model's context; reading or rewriting an entire file to touch a few lines is wasteful. The Claude Code reference's `Read` tool has exactly this (`offset`/`limit`). The read side is a pure post-`readFile` line slice; the write side is a read-modify-write splice. Neither needs a new `Platform` method (both use the existing `readFile`/`writeFile`), so the platform seam is unchanged. Full-content overwrite stays the `write_file` default for backward compatibility; richer partial edits (find/replace) remain a future `Edit` tool, out of M1.
+
+**Consequences:** Supersedes the original "exactly two minimal path-only tools" shape in the brainstorm/engineering §11. The `defineTool` schemas now carry `offset`/`limit`; the return shapes are richer (objects, still JSON-serializable). Engineering spec §11 and the code-architecture builtin skeletons updated to match; task-08 brief + tests cover the new params.

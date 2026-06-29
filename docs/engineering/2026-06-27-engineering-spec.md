@@ -1107,6 +1107,13 @@ export const writeFileTool = defineTool({ ... })
 
 These are the only tools that use `Platform` methods. All other tools a developer registers are either self-contained or also use `Platform`; the same three-argument `call` signature handles both.
 
+**Line-range support (large files).** Both tools accept optional line-range parameters so the model need not read or rewrite an entire large file:
+
+- `read_file` — `{ path, offset?, limit? }`. With no range, returns `{ content }` (whole file). With `offset` (1-based start line) and/or `limit` (max lines), returns `{ content, offset, lineCount, totalLines, truncated }` for that slice (read full via `platform.readFile`, then slice lines — no new `Platform` method).
+- `write_file` — `{ path, content, offset?, limit? }`. With no `offset`, full overwrite (creates if missing) returning `{ written, path }`. With `offset` (1-based) and optional `limit` (lines to replace, default through EOF; `0` = insert), it does a read-modify-write splice of that line range, returning `{ written, path, replacedFrom, replacedLines }`; range mode requires an existing file (`platform.readFile` throws → caught and fed back as a tool error). Full content overwrite remains the default; partial *content* edits beyond line-range replacement (e.g. find/replace) are a future `Edit` tool, out of M1 scope.
+
+The exact `defineTool` definitions are in the code-architecture doc. See `docs/decisions.md` "Built-in file tools gain optional line-range parameters".
+
 Exported from `tiny-agentic` (main entry point) as two separate exports:
 ```ts
 export { readFileTool } from "./tools/builtin/readFile.js";

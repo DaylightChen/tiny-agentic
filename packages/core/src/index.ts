@@ -4,11 +4,15 @@
 //   import { NodePlatform } from "tiny-agentic/platform/node"
 //   import { collectText } from "tiny-agentic/utils"
 
-// Types — fully implemented in task-02
+export { Agent } from "./agent.js";
+export type { AgentOptions, RunOptions } from "./agent.js";
+
 export type { AgentEvent, Terminal } from "./types/events.js";
 export type { Message, ContentBlock, TextBlock, ToolUseBlock, ToolResultBlock } from "./types/messages.js";
 export type { Tool, ToolCallContext } from "./types/tool.js";
 export { defineTool } from "./types/tool.js";
 export type { Provider, ProviderRequest, ProviderEvent, ToolSchema, Logger, LogEntry } from "./types/provider.js";
 export type { Platform, ExecOptions, ExecResult } from "./types/platform.js";
-// Agent, built-in tools, utilities — added in tasks 03–08
+
+export { readFileTool } from "./tools/builtin/readFile.js";
+export { writeFileTool } from "./tools/builtin/writeFile.js";

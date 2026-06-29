@@ -1083,14 +1083,41 @@ import { defineTool } from "../../types/tool.js";
 
 export const readFileTool = defineTool({
   name: "read_file",
-  description: "Read a file at the given path and return its contents as a string.",
+  description:
+    "Read a file at the given path. By default returns the whole file; pass offset/limit to read only a line range (useful for large files).",
   inputSchema: z.object({
     path: z.string().describe("Absolute or relative path to the file."),
+    offset: z
+      .number()
+      .int()
+      .positive()
+      .optional()
+      .describe("1-based line number to start reading from."),
+    limit: z
+      .number()
+      .int()
+      .positive()
+      .optional()
+      .describe("Maximum number of lines to read starting at offset."),
   }),
-  // `path` is typed as string (inferred from the Zod schema), not unknown.
-  call: async ({ path }, platform) => ({
-    content: await platform.readFile(path),
-  }),
+  // `path`/`offset`/`limit` are typed (inferred from the Zod schema), not unknown.
+  call: async ({ path, offset, limit }, platform) => {
+    const full = await platform.readFile(path);
+    if (offset === undefined && limit === undefined) {
+      return { content: full };
+    }
+    const lines = full.split("\n");
+    const start = offset !== undefined ? offset - 1 : 0; // 1-based → 0-based
+    const end = limit !== undefined ? start + limit : lines.length;
+    const slice = lines.slice(start, end);
+    return {
+      content: slice.join("\n"),
+      offset: start + 1,
+      lineCount: slice.length,
+      totalLines: lines.length,
+      truncated: slice.length < lines.length,
+    };
+  },
 });
 ```
 
@@ -1104,15 +1131,41 @@ import { defineTool } from "../../types/tool.js";
 
 export const writeFileTool = defineTool({
   name: "write_file",
-  description: "Write content to a file at the given path. Creates the file if it does not exist; overwrites if it does.",
+  description:
+    "Write content to a file. Without offset, replaces the whole file (creating it if needed). With offset (1-based) and optional limit, replaces that line range in an existing file with the given content (a partial, read-modify-write update) — avoids rewriting a large file to change a few lines.",
   inputSchema: z.object({
-    path:    z.string().describe("Absolute or relative path to the file."),
-    content: z.string().describe("Content to write."),
+    path: z.string().describe("Absolute or relative path to the file."),
+    content: z.string().describe("Content to write (or to substitute into the line range)."),
+    offset: z
+      .number()
+      .int()
+      .positive()
+      .optional()
+      .describe("1-based start line. If set, replace a line range instead of the whole file."),
+    limit: z
+      .number()
+      .int()
+      .nonnegative()
+      .optional()
+      .describe("Number of lines to replace starting at offset (default: through end of file). 0 inserts without deleting."),
   }),
-  // `path` and `content` are typed as string (inferred from the Zod schema).
-  call: async ({ path, content }, platform) => {
-    await platform.writeFile(path, content);
-    return { written: true, path };
+  // `path`/`content` strings; `offset`/`limit` optional numbers (inferred from the schema).
+  call: async ({ path, content, offset, limit }, platform) => {
+    if (offset === undefined) {
+      await platform.writeFile(path, content); // full overwrite (create or replace)
+      return { written: true, path };
+    }
+    // Range mode: read-modify-write. Requires an existing file; platform.readFile
+    // throws if missing, which the loop catches and feeds back as a tool error.
+    const existing = await platform.readFile(path);
+    const lines = existing.split("\n");
+    const start = offset - 1; // 1-based → 0-based; splice treats start past EOF as append
+    // Clamp to >= 0 so an offset past EOF appends cleanly (and replacedLines is never negative).
+    const deleteCount = Math.max(0, limit !== undefined ? limit : lines.length - start);
+    lines.splice(start, deleteCount, ...content.split("\n"));
+    const updated = lines.join("\n");
+    await platform.writeFile(path, updated);
+    return { written: true, path, replacedFrom: offset, replacedLines: deleteCount };
   },
 });
 ```

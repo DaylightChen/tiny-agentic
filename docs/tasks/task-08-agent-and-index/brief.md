@@ -47,38 +47,59 @@ Implement the final production modules: `packages/core/src/agent.ts` (the `Agent
 
    Note: the `finally` block calls `abortCtrl.abort()`. If the generator is abandoned (caller breaks out of `for await`), JavaScript calls the generator's `.return()` method, which triggers `finally`. This cancels any in-flight Anthropic SDK stream.
 
-2. **Create `packages/core/src/tools/builtin/readFile.ts`**:
+2. **Create `packages/core/src/tools/builtin/readFile.ts`** (with optional line-range — see `docs/decisions.md` "Built-in file tools gain optional line-range parameters" and code-architecture builtin skeleton; implement verbatim):
    ```ts
    import { z } from "zod";
    import { defineTool } from "../../types/tool.js";
 
    export const readFileTool = defineTool({
      name: "read_file",
-     description: "Read a file at the given path and return its contents as a string.",
+     description:
+       "Read a file at the given path. By default returns the whole file; pass offset/limit to read only a line range (useful for large files).",
      inputSchema: z.object({
        path: z.string().describe("Absolute or relative path to the file."),
+       offset: z.number().int().positive().optional().describe("1-based line number to start reading from."),
+       limit: z.number().int().positive().optional().describe("Maximum number of lines to read starting at offset."),
      }),
-     call: async ({ path }, platform) => ({
-       content: await platform.readFile(path),
-     }),
+     call: async ({ path, offset, limit }, platform) => {
+       const full = await platform.readFile(path);
+       if (offset === undefined && limit === undefined) return { content: full };
+       const lines = full.split("\n");
+       const start = offset !== undefined ? offset - 1 : 0;
+       const end = limit !== undefined ? start + limit : lines.length;
+       const slice = lines.slice(start, end);
+       return { content: slice.join("\n"), offset: start + 1, lineCount: slice.length, totalLines: lines.length, truncated: slice.length < lines.length };
+     },
    });
    ```
 
-3. **Create `packages/core/src/tools/builtin/writeFile.ts`**:
+3. **Create `packages/core/src/tools/builtin/writeFile.ts`** (with optional range-replace mode; implement verbatim):
    ```ts
    import { z } from "zod";
    import { defineTool } from "../../types/tool.js";
 
    export const writeFileTool = defineTool({
      name: "write_file",
-     description: "Write content to a file at the given path. Creates the file if it does not exist; overwrites if it does.",
+     description:
+       "Write content to a file. Without offset, replaces the whole file (creating it if needed). With offset (1-based) and optional limit, replaces that line range in an existing file with the given content (read-modify-write).",
      inputSchema: z.object({
-       path:    z.string().describe("Absolute or relative path to the file."),
-       content: z.string().describe("Content to write."),
+       path: z.string().describe("Absolute or relative path to the file."),
+       content: z.string().describe("Content to write (or to substitute into the line range)."),
+       offset: z.number().int().positive().optional().describe("1-based start line. If set, replace a line range instead of the whole file."),
+       limit: z.number().int().nonnegative().optional().describe("Number of lines to replace starting at offset (default: through end of file). 0 inserts without deleting."),
      }),
-     call: async ({ path, content }, platform) => {
-       await platform.writeFile(path, content);
-       return { written: true, path };
+     call: async ({ path, content, offset, limit }, platform) => {
+       if (offset === undefined) {
+         await platform.writeFile(path, content);
+         return { written: true, path };
+       }
+       const existing = await platform.readFile(path); // throws if missing → caught by loop as tool error
+       const lines = existing.split("\n");
+       const start = offset - 1;
+       const deleteCount = Math.max(0, limit !== undefined ? limit : lines.length - start); // clamp: offset past EOF appends, replacedLines never negative
+       lines.splice(start, deleteCount, ...content.split("\n"));
+       await platform.writeFile(path, lines.join("\n"));
+       return { written: true, path, replacedFrom: offset, replacedLines: deleteCount };
      },
    });
    ```
