@@ -1,5 +1,5 @@
 {
   "schemaVersion": 1,
-  "activeScope": "feature/core-run-controls",
-  "scopes": ["project", "feature/openai-provider", "feature/agent-tooling", "feature/core-run-controls"]
+  "activeScope": "feature/task-tool",
+  "scopes": ["project", "feature/openai-provider", "feature/agent-tooling", "feature/core-run-controls", "feature/task-tool"]
 }
