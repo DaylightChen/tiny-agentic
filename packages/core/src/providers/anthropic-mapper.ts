@@ -1,6 +1,7 @@
 import type Anthropic from "@anthropic-ai/sdk";
 import type { Message } from "../types/messages.js";
 import type { ProviderEvent, ProviderRequest, ToolSchema } from "../types/provider.js";
+import { type Usage, mergeUsage, EMPTY_USAGE } from "../types/usage.js";
 
 // Malformed streamed tool input (§6.1) is signalled provider-agnostically by the
 // optional `inputParseError: true` boolean on a tool_use ProviderEvent, with
@@ -58,6 +59,7 @@ type FinishResult =
 export class InputAccumulator {
   private readonly blocks = new Map<number, { id: string; name: string; json: string }>();
   private stopReason: string | undefined;
+  private turnUsage: Usage | undefined;
 
   /** Cache the stop_reason seen on a message_delta event. */
   setStopReason(reason: string): void {
@@ -67,6 +69,25 @@ export class InputAccumulator {
   /** Return the cached stop_reason at message_stop, defaulting to "end_turn". */
   takeStopReason(): string {
     return this.stopReason ?? "end_turn";
+  }
+
+  /** Initialize usage from message_start fields. Overwrites any prior usage for this turn. */
+  setUsage(u: Usage): void {
+    this.turnUsage = u;
+  }
+
+  /** Merge delta usage (message_delta fields) into the accumulated turn usage. */
+  mergeInUsage(delta: Usage): void {
+    this.turnUsage = mergeUsage(this.turnUsage ?? EMPTY_USAGE, delta);
+  }
+
+  /**
+   * Return the accumulated turn usage for this stream, or undefined if no
+   * usage-bearing event was seen. No reset is needed — InputAccumulator is
+   * instantiated fresh per provider.stream() call (one accumulator = one turn).
+   */
+  takeUsage(): Usage | undefined {
+    return this.turnUsage;
   }
 
   /** Called at content_block_start for a tool_use block. */
@@ -149,18 +170,50 @@ export function translateStreamEvent(
       // the dedicated §6.1 message. `input` stays JSON-serializable for history.
       return [{ type: "tool_use", id: finish.id, name: finish.name, input: {}, inputParseError: true }];
     }
+    case "message_start": {
+      const msg = event.message;
+      if (!isRecord(msg)) return [];
+      const usage = msg.usage;
+      if (!isRecord(usage)) return [];
+
+      const inputTokens = asNumber(usage.input_tokens);
+      const cacheRead = asNullableNumber(usage.cache_read_input_tokens) ?? 0;
+      const cacheWrite = asNullableNumber(usage.cache_creation_input_tokens);
+
+      const initialUsage: Usage = {
+        inputTokens,
+        outputTokens: 0,
+        cacheReadTokens: cacheRead,
+        ...(cacheWrite != null && cacheWrite > 0 ? { cacheWriteTokens: cacheWrite } : {}),
+      };
+      accumulator.setUsage(initialUsage);
+      return [];
+    }
     case "message_delta": {
       // stop_reason lives on the message_delta; cache it for the message_stop below.
       const delta = event.delta;
       if (isRecord(delta) && typeof delta.stop_reason === "string") {
         accumulator.setStopReason(delta.stop_reason);
       }
+      // Capture output tokens and cache-read tokens from this event.
+      const deltaUsage = event.usage; // top-level 'usage' on message_delta, not delta.usage
+      if (isRecord(deltaUsage)) {
+        const outputTokens = asNumber(deltaUsage.output_tokens);
+        const cacheRead = asNullableNumber(deltaUsage.cache_read_input_tokens) ?? 0;
+        accumulator.mergeInUsage({ inputTokens: 0, outputTokens, cacheReadTokens: cacheRead });
+      }
       return [];
     }
-    case "message_stop":
-      return [{ type: "message_stop", stopReason: accumulator.takeStopReason() }];
+    case "message_stop": {
+      const u = accumulator.takeUsage();
+      return [{
+        type: "message_stop",
+        stopReason: accumulator.takeStopReason(),
+        ...(u !== undefined ? { usage: u } : {}),
+      }];
+    }
     default:
-      return []; // message_start, ping, etc. — ignored in M1
+      return []; // ping, etc. — ignored
   }
 }
 
@@ -174,4 +227,8 @@ function asString(value: unknown): string {
 
 function asNumber(value: unknown): number {
   return typeof value === "number" ? value : 0;
+}
+
+function asNullableNumber(value: unknown): number | null {
+  return typeof value === "number" ? value : null;
 }

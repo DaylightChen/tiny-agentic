@@ -261,3 +261,169 @@ describe("translateStreamEvent — ignored / unknown events", () => {
     expect(translateStreamEvent({}, acc)).toEqual([]);
   });
 });
+
+describe("translateStreamEvent — usage capture", () => {
+  // a. message_start with cacheWriteTokens > 0 → usage attached to message_stop
+  it("message_start(input=100, cache_creation=7, cache_read=0) + message_stop → usage with cacheWriteTokens", () => {
+    const events = [
+      {
+        type: "message_start",
+        message: {
+          usage: {
+            input_tokens: 100,
+            output_tokens: 0,
+            cache_creation_input_tokens: 7,
+            cache_read_input_tokens: 0,
+          },
+        },
+      },
+      { type: "message_stop" },
+    ];
+
+    const out = run(events);
+    expect(out).toHaveLength(1);
+    const stop = out[0] as Extract<ProviderEvent, { type: "message_stop" }>;
+    expect(stop.type).toBe("message_stop");
+    expect(stop.usage).toEqual({
+      inputTokens: 100,
+      outputTokens: 0,
+      cacheReadTokens: 0,
+      cacheWriteTokens: 7,
+    });
+  });
+
+  // b. cache_creation_input_tokens: null → cacheWriteTokens key absent
+  it("message_start with cache_creation_input_tokens:null → no cacheWriteTokens key on usage", () => {
+    const events = [
+      {
+        type: "message_start",
+        message: {
+          usage: {
+            input_tokens: 50,
+            output_tokens: 0,
+            cache_creation_input_tokens: null,
+            cache_read_input_tokens: 0,
+          },
+        },
+      },
+      { type: "message_stop" },
+    ];
+
+    const out = run(events);
+    expect(out).toHaveLength(1);
+    const stop = out[0] as Extract<ProviderEvent, { type: "message_stop" }>;
+    expect(stop.usage).toBeDefined();
+    expect("cacheWriteTokens" in (stop.usage ?? {})).toBe(false);
+    expect(stop.usage?.inputTokens).toBe(50);
+    expect(stop.usage?.outputTokens).toBe(0);
+    expect(stop.usage?.cacheReadTokens).toBe(0);
+  });
+
+  // c. message_delta adds outputTokens; inputTokens from message_start survives (mergeUsage >0 guard)
+  it("message_start(input=100) + message_delta(output=25, cache_read=0) + message_stop → merged usage", () => {
+    const events = [
+      {
+        type: "message_start",
+        message: {
+          usage: {
+            input_tokens: 100,
+            output_tokens: 0,
+            cache_creation_input_tokens: null,
+            cache_read_input_tokens: 0,
+          },
+        },
+      },
+      {
+        type: "message_delta",
+        delta: { stop_reason: "end_turn" },
+        usage: { output_tokens: 25, cache_read_input_tokens: 0 },
+      },
+      { type: "message_stop" },
+    ];
+
+    const out = run(events);
+    expect(out).toHaveLength(1);
+    const stop = out[0] as Extract<ProviderEvent, { type: "message_stop" }>;
+    expect(stop.usage).toEqual({
+      inputTokens: 100,
+      outputTokens: 25,
+      cacheReadTokens: 0,
+    });
+    // cacheWriteTokens was null at start → absent
+    expect("cacheWriteTokens" in (stop.usage ?? {})).toBe(false);
+  });
+
+  // d. Full sequence with cacheRead on message_delta → cacheReadTokens from delta used; inputTokens preserved
+  it("full sequence: message_start cache_read=0 + message_delta cache_read=5 → cacheReadTokens=5, inputTokens preserved", () => {
+    const events = [
+      {
+        type: "message_start",
+        message: {
+          usage: {
+            input_tokens: 200,
+            output_tokens: 0,
+            cache_creation_input_tokens: 10,
+            cache_read_input_tokens: 0,
+          },
+        },
+      },
+      {
+        type: "message_delta",
+        delta: { stop_reason: "end_turn" },
+        usage: { output_tokens: 50, cache_read_input_tokens: 5 },
+      },
+      { type: "message_stop" },
+    ];
+
+    const out = run(events);
+    expect(out).toHaveLength(1);
+    const stop = out[0] as Extract<ProviderEvent, { type: "message_stop" }>;
+    // cacheReadTokens: mergeUsage >0 guard: delta has 5, so 5 wins over start's 0
+    expect(stop.usage?.cacheReadTokens).toBe(5);
+    // inputTokens from message_start preserved (delta sends 0, mergeUsage keeps 200)
+    expect(stop.usage?.inputTokens).toBe(200);
+    // outputTokens from message_delta
+    expect(stop.usage?.outputTokens).toBe(50);
+    // cacheWriteTokens from message_start (10 > 0)
+    expect(stop.usage?.cacheWriteTokens).toBe(10);
+  });
+
+  // e. Bare message_stop with no preceding usage events → no `usage` field at all
+  it("bare message_stop (no preceding usage events) → no usage field on emitted event", () => {
+    const events = [{ type: "message_stop" }];
+    const out = run(events);
+    expect(out).toHaveLength(1);
+    const evt = out[0]!;
+    expect(evt).toEqual({ type: "message_stop", stopReason: "end_turn" });
+    expect("usage" in evt).toBe(false);
+  });
+
+  // f. InputAccumulator unit tests
+  describe("InputAccumulator — usage methods", () => {
+    it("setUsage then takeUsage returns the set value", () => {
+      const acc = new InputAccumulator();
+      acc.setUsage({ inputTokens: 100, outputTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 7 });
+      expect(acc.takeUsage()).toEqual({
+        inputTokens: 100,
+        outputTokens: 0,
+        cacheReadTokens: 0,
+        cacheWriteTokens: 7,
+      });
+    });
+
+    it("mergeInUsage after setUsage merges correctly — outputTokens added, inputTokens preserved", () => {
+      const acc = new InputAccumulator();
+      acc.setUsage({ inputTokens: 100, outputTokens: 0, cacheReadTokens: 0 });
+      acc.mergeInUsage({ inputTokens: 0, outputTokens: 25, cacheReadTokens: 0 });
+      const usage = acc.takeUsage();
+      expect(usage?.inputTokens).toBe(100);
+      expect(usage?.outputTokens).toBe(25);
+      expect(usage?.cacheReadTokens).toBe(0);
+    });
+
+    it("fresh accumulator with no usage calls → takeUsage() returns undefined", () => {
+      const acc = new InputAccumulator();
+      expect(acc.takeUsage()).toBeUndefined();
+    });
+  });
+});
