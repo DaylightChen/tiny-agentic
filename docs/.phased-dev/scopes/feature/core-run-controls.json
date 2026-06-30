@@ -1,0 +1,44 @@
+{
+  "schemaVersion": 1,
+  "id": "feature/core-run-controls",
+  "type": "feature",
+  "name": "core-run-controls",
+  "pipeline": [
+    {
+      "phase": "research",
+      "agent": "researcher",
+      "outputCheck": "docs/feature/core-run-controls/research/*.md"
+    },
+    {
+      "phase": "engineering",
+      "agent": "feature-architect",
+      "outputCheck": "docs/feature/core-run-controls/engineering/*.md"
+    },
+    {
+      "phase": "plan",
+      "agent": "planner",
+      "outputCheck": [
+        "docs/feature/core-run-controls/plan/implementation-plan.md",
+        "docs/feature/core-run-controls/tasks/task-*/brief.md"
+      ]
+    },
+    {
+      "phase": "implement",
+      "agent": null,
+      "outputCheck": [
+        "docs/feature/core-run-controls/tasks/task-*/brief.md",
+        "docs/feature/core-run-controls/tasks/task-*/completion.md"
+      ]
+    }
+  ],
+  "currentPhase": "research",
+  "phaseStatus": "in_progress",
+  "paths": {
+    "researchDir": "docs/feature/core-run-controls/research/",
+    "engineeringDir": "docs/feature/core-run-controls/engineering/",
+    "plan": "docs/feature/core-run-controls/plan/implementation-plan.md",
+    "tasks": "docs/feature/core-run-controls/tasks/",
+    "decisions": "docs/feature/core-run-controls/decisions.md"
+  },
+  "history": []
+}
