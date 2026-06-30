@@ -3,7 +3,7 @@ import type { Platform } from "../types/platform.js";
 import type { AgentEvent, Terminal } from "../types/events.js";
 import type { Message, ContentBlock } from "../types/messages.js";
 import type { ApprovalHandler, ToolCallContext } from "../types/tool.js";
-import { EMPTY_USAGE } from "../types/usage.js";
+import { type Usage, EMPTY_USAGE, accumulateUsage } from "../types/usage.js";
 import { ToolRegistry } from "../tools/registry.js";
 import { runTools } from "./runTools.js";
 import { serializeToolResult } from "../utils/serialize.js";
@@ -26,13 +26,16 @@ export async function* agentLoop(params: LoopParams): AsyncGenerator<AgentEvent,
   const toolSchemas = registry.toSchemas();
   let turnIndex = 0;
   let turnsUsed = 0;
+  let cumulativeUsage: Usage = { ...EMPTY_USAGE };
 
   while (true) {
+    let turnUsage: Usage | undefined;
+
     // Guard
     if (turnsUsed >= maxTurns) {
-      const event = { type: "max_turns_exceeded" as const, turnsUsed, messages: workingMessages, usage: EMPTY_USAGE };
+      const event = { type: "max_turns_exceeded" as const, turnsUsed, messages: workingMessages, usage: cumulativeUsage };
       yield event;
-      return { reason: "max_turns_exceeded", turnsUsed, messages: workingMessages, usage: EMPTY_USAGE };
+      return { reason: "max_turns_exceeded", turnsUsed, messages: workingMessages, usage: cumulativeUsage };
     }
 
     // Stream model
@@ -55,14 +58,22 @@ export async function* agentLoop(params: LoopParams): AsyncGenerator<AgentEvent,
             parseError: event.inputParseError ?? false,
           });
           yield { type: "tool_use_start", toolName: event.name, toolInput: event.input };
+        } else if (event.type === "message_stop") {
+          if (event.usage !== undefined) {
+            turnUsage = event.usage;
+          }
         }
         // message_stop is consumed but not yielded
       }
     } catch (err) {
       const error = err instanceof Error ? err : new Error(String(err));
-      const event = { type: "agent_error" as const, error, messages: workingMessages, usage: EMPTY_USAGE };
+      const event = { type: "agent_error" as const, error, messages: workingMessages, usage: cumulativeUsage };
       yield event;
-      return { reason: "agent_error", error, messages: workingMessages, usage: EMPTY_USAGE };
+      return { reason: "agent_error", error, messages: workingMessages, usage: cumulativeUsage };
+    }
+
+    if (turnUsage !== undefined) {
+      cumulativeUsage = accumulateUsage(cumulativeUsage, turnUsage);
     }
 
     // Accumulate assistant turn
@@ -121,15 +132,15 @@ export async function* agentLoop(params: LoopParams): AsyncGenerator<AgentEvent,
 
       workingMessages.push({ role: "user", content: toolResultBlocks });
 
-      yield { type: "turn_complete", turnIndex };
+      yield { type: "turn_complete", turnIndex, ...(turnUsage !== undefined ? { usage: turnUsage } : {}) };
       turnIndex++;
       // loop
     } else {
       // Natural completion
-      yield { type: "turn_complete", turnIndex };
-      const event = { type: "agent_done" as const, messages: workingMessages, usage: EMPTY_USAGE };
+      yield { type: "turn_complete", turnIndex, ...(turnUsage !== undefined ? { usage: turnUsage } : {}) };
+      const event = { type: "agent_done" as const, messages: workingMessages, usage: cumulativeUsage };
       yield event;
-      return { reason: "agent_done", messages: workingMessages, usage: EMPTY_USAGE };
+      return { reason: "agent_done", messages: workingMessages, usage: cumulativeUsage };
     }
   }
 }
