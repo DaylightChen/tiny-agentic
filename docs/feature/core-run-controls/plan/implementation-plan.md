@@ -18,6 +18,7 @@ The order is the execution order. Sequential — each task starts from the commi
 4. **task-04-loop-accumulation** — Wire usage accumulation into `agentLoop` in `loop/loop.ts`: declare `cumulativeUsage` at function scope, declare `turnUsage` as the FIRST statement inside `while(true)`, read `event.usage` from `message_stop`, call `accumulateUsage` after the inner `for await`, and attach `usage` to all three terminal event/return pairs and to `turn_complete`. Extend `loop.test.ts` with usage-accumulation scenarios.
 5. **task-05-anthropic-usage-capture** — Add `setUsage`/`mergeInUsage`/`takeUsage` to `InputAccumulator` in `anthropic-mapper.ts` and add usage capture to `translateStreamEvent` for `message_start`, `message_delta`, and `message_stop` (conditional emit). Extend `anthropic-mapper.test.ts` with usage capture tests and update any `message_stop` deep-equality assertions affected by the conditional usage field.
 6. **task-06-openai-usage-capture** — Add `setUsage`/`chunkUsage` to `ToolCallAccumulator` and restructure `translateChunk` to read `chunk.usage` before the `choices.length === 0` early-return in `openai-mapper.ts`; add `stream_options: { include_usage: true }` to `OpenAIChatCompletionParams` and `mapRequest`. Extend `openai-mapper.test.ts` with usage capture tests and update the `message_stop` deep-equality assertion at L671.
+7. **task-07-examples** — Extend the two example files (`examples/basic-run.ts` for Anthropic, `examples/openai-run.ts` for OpenAI) with a "Turn 5: run controls" section demonstrating (a) reading cumulative `usage` from the terminal event + per-turn from `turn_complete`, and (b) external `AbortSignal` cancellation via `run(prompt, { signal })` surfacing `agent_error` + partial usage. Typecheck-only acceptance (examples are run manually); committed `openai-run.ts` keeps env-var creds.
 
 ## Dependency rationale
 
@@ -30,6 +31,8 @@ The order is the execution order. Sequential — each task starts from the commi
 **task-04 (loop accumulation) after types and signal, before providers.** `agentLoop` reads `event.usage` from `message_stop`, which requires the updated `ProviderEvent.message_stop` type (`usage?: Usage`) from task-02. It also constructs all three terminal event/return pairs with `usage: cumulativeUsage`, which requires the updated `AgentEvent`/`Terminal` types from task-02. Placing loop accumulation before the provider tasks means task-04 tests (with a MockProvider emitting bare `{ type: "message_stop", stopReason: "end_turn" }`) exercise the "no usage captured" path and produce `EMPTY_USAGE` terminals — validating the fallback path before the providers supply real usage.
 
 **task-05 (Anthropic) and task-06 (OpenAI) after loop: both providers are independent of each other; loop must exist first.** The providers emit `message_stop` with `usage` — but only the loop reads that field. Until the loop wiring (task-04) is in place, a `message_stop` with `usage` would be silently dropped. Completing the loop first means task-05/06 can write end-to-end tests that trace usage all the way from a provider event through the loop to the terminal event. Task-05 before task-06 is an arbitrary risk-ordering choice: Anthropic has the more complex accumulation logic (two SDK events, `mergeUsage`, `asNullableNumber` guard, `cacheWriteTokens`) and schedules first.
+
+**task-07 (examples) last: needs the full public API.** The run-controls example reads `event.usage` and calls `run(prompt, { signal })` — both only exist once tasks 01–06 are implemented (the `usage` field, `RunOptions.signal`, and both providers' usage capture). It is documentation/demonstration only (no production code, no new tests; acceptance is typecheck-against-the-built-package), so it carries no downstream risk and naturally sits at the end.
 
 **No scaffolding task needed.** This is a feature on a mature codebase. The stack is proven. The "prove the stack works" role is served by task-01's `pnpm -r test` run against the 196 existing tests (all of which should pass after task-01's purely additive change).
 
@@ -95,6 +98,7 @@ The order is the execution order. Sequential — each task starts from the commi
 | §13 Test strategy: `openai-mapper.test.ts` usage additions | task-06 | |
 | §13 Test strategy: `loop.test.ts` accumulation additions | task-04 | |
 | §13 AbortSignal composition integration | task-03 | Pre-aborted + mid-run abort via MockProvider |
+| §3.1 Consumer flows demonstrated in runnable examples (both providers) | task-07 | `examples/basic-run.ts` + `examples/openai-run.ts` — signal cancellation + usage reading |
 
 ### Explicit deferrals
 

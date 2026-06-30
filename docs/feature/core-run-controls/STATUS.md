@@ -8,7 +8,7 @@
 **plan** (complete — awaiting approval)
 
 ## Last Completed
-- `plan` written: `docs/feature/core-run-controls/plan/implementation-plan.md` + 6 task briefs. Order: usage-foundation → type-changes+test-fixes → external-abort-signal → loop-accumulation → anthropic-usage-capture → openai-usage-capture. Build-green invariant preserved (task-02 collapses the type change + compile-breaking literal fixes).
+- `plan` written: `docs/feature/core-run-controls/plan/implementation-plan.md` + 7 task briefs. Order: usage-foundation → type-changes+test-fixes → external-abort-signal → loop-accumulation → anthropic-usage-capture → openai-usage-capture → examples (run-controls demo for both providers). Build-green invariant preserved (task-02 collapses the type change + compile-breaking literal fixes).
 
 ## What's Next
 - Review the plan + briefs, then run `/phased-dev:advance-phase` to move to `implement` (then `/phased-dev:start-task 01`).
