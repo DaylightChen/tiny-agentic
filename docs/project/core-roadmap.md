@@ -2,26 +2,29 @@
 
 > **Status:** living reference. Captures what is still worth building **in `packages/core`** (the UI-free, headless engine), and what deliberately belongs elsewhere (SDK layer / separate packages).
 >
-> **Date:** 2026-06-29. **Author:** orchestrator analysis after the `agent-tooling` feature landed.
+> **Date:** 2026-06-29; **last updated 2026-06-30** after the `core-run-controls` feature landed (Tier-1 #2 + #3 done).
 >
 > This is a roadmap, not a commitment. Each Tier-1/2 item becomes its own `phased-dev` feature scope when picked up. Cross-cutting design decisions already locked live in `docs/project/decisions.md`; defer-to-SDK rationale is there too.
 
-## Current state of `packages/core` (as of 2026-06-29)
+## Current state of `packages/core` (as of 2026-06-30)
 
 The core is a working headless agent:
 
-- **Loop:** stateless `agentLoop` async generator, `maxTurns` guard, abort-on-break, defensive tool-result serialization.
-- **Providers:** Anthropic + OpenAI behind the `Provider` abstraction, with SDK-delegated retry (`maxRetries`).
+- **Loop:** stateless `agentLoop` async generator, `maxTurns` guard, abort-on-break, defensive tool-result serialization, per-turn → run-level token-usage accumulation.
+- **Providers:** Anthropic + OpenAI behind the `Provider` abstraction, with SDK-delegated retry (`maxRetries`); both capture and normalize token usage.
 - **Platform:** `cwd` / `readFile` / `writeFile` / `exec` (Node impl; `exec` supports `shell` + `signal` as of `agent-tooling`).
 - **Built-in tools:** `read_file`, `write_file` (with line-range mode), `bash`, `edit_file`.
 - **Permission seam:** optional `approvalHandler(toolName, input) → 'allow' | 'deny'` on `AgentOptions`, gated in `runTools` before `tool.call`. Default = blanket allow.
-- **Cancellation:** the run's `AbortSignal` threads through `ToolCallContext.signal` into `Platform.exec`.
+- **Cancellation:** the run's `AbortSignal` threads through `ToolCallContext.signal` into `Platform.exec`; **external `AbortSignal` accepted on `run(prompt, { signal })`** (composed via `AbortSignal.any`, pre-flight guard).
+- **Token usage:** normalized `Usage` (`{ inputTokens, outputTokens, cacheReadTokens, cacheWriteTokens? }`) on the terminal `AgentEvent`s + `Terminal` (cumulative) and on `turn_complete` (per-turn); `mergeUsage`/`accumulateUsage`/`EMPTY_USAGE` helpers exported.
 
-Feature history: M1 core (`docs/project/`), `openai-provider` feature, `agent-tooling` feature (`docs/feature/agent-tooling/`).
+Feature history: M1 core (`docs/project/`), `openai-provider`, `agent-tooling`, `core-run-controls` (`docs/feature/<name>/`).
 
 ---
 
 ## Tier 1 — real gaps, high leverage, unambiguously core
+
+> **Progress:** #2 (token usage) and #3 (external AbortSignal) shipped in the `core-run-controls` feature (2026-06-30) — see `docs/feature/core-run-controls/`. Remaining Tier-1: #1 (fs-discovery) and #4 (sub-agent Task tool, prioritized).
 
 ### 1. Filesystem *discovery* tools (`ls` / `glob` / `grep`)
 
@@ -31,29 +34,21 @@ Feature history: M1 core (`docs/project/`), `openai-provider` feature, `agent-to
 - Requires **new `Platform` methods** (`listDir` / `glob` / `stat`). This is the breaking `Platform` change the M1 decisions log explicitly anticipated for M2 (adding methods forces all `Platform` implementors, incl. `MockPlatform`, to update — acceptable, caught at compile time).
 - Recommended as the **next core feature**.
 
-### 2. Token usage in the event stream + `Terminal`
+### 2. Token usage in the event stream + `Terminal` — ✅ DONE (core-run-controls, 2026-06-30)
 
-`AgentEvent` and `Terminal` (`packages/core/src/types/events.ts`) currently carry **no usage data**, though both provider SDKs return it.
+Shipped: normalized `Usage` (`{ inputTokens, outputTokens, cacheReadTokens, cacheWriteTokens? }`) on the terminal `AgentEvent`s + `Terminal` (cumulative) and on `turn_complete` (per-turn), captured from both providers (Anthropic `message_start`/`message_delta`; OpenAI `include_usage` + `translateChunk`), accumulated in the loop. `mergeUsage`/`accumulateUsage`/`EMPTY_USAGE` exported. **Unblocks** context compaction (SDK) and provides the **Task-tool usage roll-up seam** (`Terminal.usage`).
 
-- Surface `usage` (input / output / cache-read / cache-write tokens) on a `message_stop`-style event and on the `Terminal` return value.
-- Small, pure-core, and **foundational**: unlocks cost tracking, context-budget decisions, and eventually compaction (Tier-3).
-- Cheap enough to fold into another feature; do it early.
+### 3. External `AbortSignal` on `run()` — ✅ DONE (core-run-controls, 2026-06-30)
 
-### 3. External `AbortSignal` on `run()`
+Shipped: `RunOptions.signal?` composed with the internal controller via `AbortSignal.any`, with a pre-flight `signal.aborted` guard. Consumers can now cancel from outside (timeout / Ctrl-C / a parent cancelling a child). **Sub-agent enabler** (#4): a parent can cancel a child run.
 
-`Agent.run()` (`packages/core/src/agent.ts`) creates its `AbortController` internally; today the only way to cancel is to `break` the `for await` loop. A consumer cannot cancel from *outside* — no timeout, no Ctrl-C handler, no cancel button.
-
-- Add `run(prompt, { signal })` (extend `RunOptions`) that links an external signal into the internal controller.
-- Small, clean, pure-core; composes directly with the cancellation threading built in `agent-tooling`.
-- Doubles as a **sub-agent enabler** (#4): a parent must be able to cancel a child run.
-
-### 4. Sub-agent / `Task` tool  ⭐ prioritized (2026-06-30)
+### 4. Sub-agent / `Task` tool  ⭐ prioritized — NEXT (enablers now in place)
 
 A built-in tool that runs a **nested `Agent`** with its own tool set and turn budget, returning a summarized result to the parent. Promoted from Tier 2 to Tier 1 as the next core feature to pursue — it is the capability that turns "an agent" into "an agent framework."
 
 - The brainstorm flagged sub-agents as core.
+- **Both enablers are now shipped (#2 token usage, #3 external AbortSignal)** — this is why `core-run-controls` was sequenced first. The Task tool can roll child usage up via `Terminal.usage` and propagate cancellation to children via the external signal.
 - Largest Tier-1 lift. Design points to settle: the `Task` tool wraps a nested `Agent` instance; parent/child isolation (separate history, tool set, `maxTurns`); how child progress surfaces to the parent stream (summarized final result vs. forwarded events); and a **recursion-depth guard** so an agent can't spawn children unboundedly.
-- Leans on the other Tier-1 items as enablers: **external `AbortSignal` (#3)** to propagate cancellation to children, and **token usage (#2)** to roll child usage up into the parent. Neither is a hard blocker, but landing #3 (and ideally #2) first makes the Task tool cleaner.
 
 ---
 
@@ -82,8 +77,8 @@ The `isConcurrencySafe?(input)` hook already exists on the `Tool` interface (`pa
 
 > Reordered 2026-06-30 to prioritize the sub-agent `Task` tool (#4).
 
-1. **External `AbortSignal` on `run()` (#3)** + **token usage in events (#2)** — small, pure-core, and the enablers the Task tool builds on (child cancellation + usage roll-up). Land these first.
-2. **Sub-agent `Task` tool (#4)** ⭐ — the prioritized core feature; nests an `Agent` behind a tool with parent/child isolation and a recursion-depth guard.
+1. ~~**External `AbortSignal` on `run()` (#3)** + **token usage in events (#2)**~~ — ✅ **DONE** (`core-run-controls`, 2026-06-30). The enablers the Task tool builds on.
+2. **Sub-agent `Task` tool (#4)** ⭐ — **NEXT.** The prioritized core feature; nests an `Agent` behind a tool with parent/child isolation and a recursion-depth guard.
 3. **`fs-discovery-tools` (#1)** — high-impact `ls`/`glob`/`grep` + the anticipated `Platform` method additions; gives both the parent and its sub-agents real filesystem reach.
 4. **Concurrent tool execution (#5)** — once more read-only tools exist to benefit from it.
 5. Then shift to the **SDK layer** (`packages/sdk`): permission policy engine, context compaction (on top of #2), sessions/memory/skills.
