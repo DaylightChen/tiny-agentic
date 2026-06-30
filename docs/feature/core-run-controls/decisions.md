@@ -123,3 +123,27 @@
 **Rationale:** Usage is foundational, not opt-in. Always-on is simpler (no conditional logic in `mapRequest`, no extra `OpenAIProvider` option), consistent (all runs produce usage data or EMPTY_USAGE fallback), and cheap (a few bytes of overhead). No consumer of `tiny-agentic` would want usage disabled once available.
 
 **Consequences:** `OpenAIChatCompletionParams.stream_options` becomes a required field with literal type `{ include_usage: true }`. The `mapRequest` return object always includes it. Existing `openai-mapper.test.ts` tests that call `mapRequest` should be updated to assert `params.stream_options` equals `{ include_usage: true }`. Any test asserting the exact key set of the returned object will need updating.
+
+---
+
+## 2026-06-30 — message_stop usage attachment is CONDITIONAL on both providers (final-review correction)
+
+**Phase:** engineering (final-review correction)
+
+**Decision:** Both provider accumulators expose `takeUsage(): Usage | undefined` and attach `usage` to the emitted `message_stop` event via conditional spread (`...(u !== undefined ? { usage: u } : {})`). `message_stop.usage` is present iff a usage-bearing event was seen during that turn. This supersedes the earlier draft where Anthropic attached `usage` unconditionally while OpenAI attached it conditionally.
+
+**Rationale:** The final review caught the asymmetry (Anthropic `takeUsage(): Usage` always-present vs. OpenAI conditional) — both an internal inconsistency (an earlier section already typed `takeUsage(): Usage | undefined`) and a needless source of test churn. Making both conditional: (a) keeps the `message_stop` ProviderEvent backward-compatible for any mock/test emitting a bare `{ type: "message_stop", stopReason }`; (b) minimizes deep-equality test churn to only those streams that actually carry usage; (c) the loop already tolerates absence (it accumulates only when `turnUsage !== undefined`). On the happy path both providers always capture usage, so observable behavior is unchanged.
+
+**Consequences:** `InputAccumulator.turnUsage` is `Usage | undefined` (undefined until first usage event; `mergeInUsage` seeds from `EMPTY_USAGE`). The planner's test-update task must scan BOTH `anthropic-mapper.test.ts` and `openai-mapper.test.ts` for `message_stop` deep-equality assertions, but only usage-bearing streams are affected.
+
+---
+
+## 2026-06-30 — Final-review corrections folded into the spec
+
+**Phase:** engineering (final-review)
+
+**Decision:** The engineering spec was amended in place to incorporate all four findings from the final review (see `engineering/2026-06-30-spec-review-addendum.md`): (1) §11/§12 now list the compile-breaking typed-literal terminals in `collect.test.ts` (L18/66/82) and `types.test.ts` (L65/77) that must get `usage: EMPTY_USAGE`; (2) §6/§9 pin `let turnUsage` to the first statement inside the `while (true)` body; (3) `message_stop` usage is conditional on both providers (entry above); (4) test directory clarified to `packages/core/src/__tests__/` and redundant guards removed from the OpenAI `translateChunk` sketch.
+
+**Rationale:** Two independent reviewers verified the spec's design and code sketches against real code, real SDK types, and a real `tsc` compile (exit 0). No design flaw; the corrections are precision/completeness fixes. Folding them into the spec keeps it the single authoritative source for the planner rather than requiring an addendum cross-reference.
+
+**Consequences:** The spec is build-accurate. Planner inputs: this decisions log + the amended spec. Regression bar: 196 existing tests (after the ~7 mechanical `usage` updates: 5 typed-literal compile fixes + `openai-mapper.test.ts:671` + any usage-bearing `anthropic-mapper.test.ts` message_stop assertions).

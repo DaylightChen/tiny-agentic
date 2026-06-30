@@ -1,5 +1,10 @@
 # Engineering Spec — Final Review Addendum
 
+> **STATUS: RESOLVED (2026-06-30).** All four items below have been folded directly into `2026-06-30-core-run-controls-engineering.md` and `decisions.md`. The spec is now the single authoritative source; this addendum is retained as the review record. Summary of what changed in the spec: (1) §11/§12 now list the compile-breaking `collect.test.ts`/`types.test.ts` typed-literal terminals requiring `usage: EMPTY_USAGE`; (2) §6/§9 pin `let turnUsage` to the first statement inside the `while(true)` body; (3) `message_stop` usage is now conditional on BOTH providers (`takeUsage(): Usage | undefined`), with `anthropic-mapper.test.ts` added to the test-impact scan; (4) test dir corrected to `src/__tests__/`, redundant `translateChunk` guards removed.
+
+---
+
+
 > Final review of `2026-06-30-core-run-controls-engineering.md`, run 2026-06-30 by two independent reviewers (adversarial code-sketch review + codebase blast-radius audit) against the real code, SDK types, and a real `tsc` compile. **Verdict: spec is SOUND — design and code sketches verified correct.** The items below are corrections/constraints the **planner must fold in**; they do not require re-doing the spec.
 
 ## Verified correct (no action)

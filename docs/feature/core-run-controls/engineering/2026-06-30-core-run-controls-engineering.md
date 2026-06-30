@@ -193,7 +193,7 @@ The `> 0` guard in `mergeUsage` follows the reference's `updateUsage` pattern: a
 | Module | Change |
 |---|---|
 | `packages/core/src/agent.ts` | `RunOptions` gains `signal?: AbortSignal`. `run()` composes signals with `AbortSignal.any`, adds pre-flight abort guard, threads `usage` into all terminal-event construction (delegated via `agentLoop` return value). |
-| `packages/core/src/loop/loop.ts` | `agentLoop` maintains a `cumulativeUsage: Usage` (starting `{ ...EMPTY_USAGE }`) and a `turnUsage: Usage | undefined`. Reads `event.usage` off `message_stop`. Accumulates with `accumulateUsage`. Attaches `usage` to `turn_complete` events and all terminal events/returns. |
+| `packages/core/src/loop/loop.ts` | `agentLoop` maintains a function-level `cumulativeUsage: Usage` (starting `{ ...EMPTY_USAGE }`) and a **per-turn** `turnUsage: Usage \| undefined` declared as the FIRST statement inside the `while (true)` body (reset every turn — see §9 for the exact site). Reads `event.usage` off `message_stop`. Accumulates with `accumulateUsage`. Attaches `usage` to `turn_complete` events and all terminal events/returns. |
 | `packages/core/src/types/events.ts` | All three terminal `AgentEvent` variants gain `usage: Usage` (non-optional). `turn_complete` gains `usage?: Usage`. Imports `Usage` from `./usage.js`. |
 | `packages/core/src/types/provider.ts` | `message_stop` ProviderEvent variant gains `usage?: Usage`. Imports `Usage` from `./usage.js`. |
 | `packages/core/src/providers/anthropic-mapper.ts` | `InputAccumulator` gains `setUsage(u: Usage): void` and `takeUsage(): Usage | undefined` (mirroring `setStopReason`/`takeStopReason`). `translateStreamEvent` captures usage from `message_start` and `message_delta` events; emits `usage` on `message_stop`. Imports `Usage`, `mergeUsage` from `../types/usage.js`. |
@@ -438,9 +438,10 @@ The `> 0` guard in `mergeUsage` ensures that if `message_delta.cache_read_input_
 
 - Import `Usage`, `EMPTY_USAGE`, `accumulateUsage` from `../types/usage.js`
 - In `agentLoop`:
-  - Declare `let cumulativeUsage: Usage = { ...EMPTY_USAGE };` at the start of the function.
-  - In the `for await` over `provider.stream()`: when `event.type === "message_stop"`, capture `event.usage` into a local `let turnUsage: Usage | undefined`.
-  - After the `for await` (or in the `message_stop` branch), if `turnUsage` is defined, call `cumulativeUsage = accumulateUsage(cumulativeUsage, turnUsage)`.
+  - Declare `let cumulativeUsage: Usage = { ...EMPTY_USAGE };` at the **start of the function** (run-level, persists across turns).
+  - **Declare `let turnUsage: Usage | undefined;` as the FIRST statement inside the `while (true)` body** — NOT inside the inner `for await`, and NOT at function level. This is load-bearing: it must be (a) reset to `undefined` each turn, and (b) still in scope at the `turn_complete` yields, which occur at `loop.ts:123` (tool path) and `loop.ts:128` (natural-completion path) — i.e. AFTER the inner `for await (provider.stream())` loop. A function-level declaration would be stale across turns; a declaration inside the `for await`/`message_stop` branch would be out of scope at the yields. Both are wrong.
+  - In the inner `for await` over `provider.stream()`: when `event.type === "message_stop"`, assign `turnUsage = event.usage;` (may be `undefined` if the provider emitted no usage — e.g. an aborted OpenAI turn).
+  - After the inner `for await` completes, if `turnUsage !== undefined`, call `cumulativeUsage = accumulateUsage(cumulativeUsage, turnUsage)`.
   - In `turn_complete` yield: `yield { type: "turn_complete", turnIndex, ...(turnUsage !== undefined ? { usage: turnUsage } : {}) };`
     - Note: `exactOptionalPropertyTypes` requires the conditional spread pattern here.
   - In `max_turns_exceeded`: `yield { type: "max_turns_exceeded", turnsUsed, messages: workingMessages, usage: cumulativeUsage }; return { reason: "max_turns_exceeded", turnsUsed, messages: workingMessages, usage: cumulativeUsage };`
@@ -449,16 +450,18 @@ The `> 0` guard in `mergeUsage` ensures that if `message_delta.cache_read_input_
 
 ### `packages/core/src/providers/anthropic-mapper.ts`
 
-- Import `Usage`, `mergeUsage` from `../types/usage.js`
-- `InputAccumulator` gains:
-  - Private field `private turnUsage: Usage = { inputTokens: 0, outputTokens: 0, cacheReadTokens: 0 };`
-  - `setUsage(u: Usage): void` — stores `this.turnUsage = u`
-  - `mergeInUsage(delta: Partial<Usage>): void` — merges delta into `this.turnUsage` via `mergeUsage`
-  - `takeUsage(): Usage` — returns `this.turnUsage`
+- Import `Usage`, `mergeUsage`, `EMPTY_USAGE` from `../types/usage.js`
+- `InputAccumulator` gains (mirroring the existing `stopReason` capture pattern):
+  - Private field `private turnUsage: Usage | undefined;` — **undefined until the first usage-bearing event** (so `message_stop` can omit `usage` entirely when nothing was captured, matching OpenAI's conditional behavior — see "Usage attachment is conditional on BOTH providers" below).
+  - `setUsage(u: Usage): void` — `this.turnUsage = u`
+  - `mergeInUsage(delta: Usage): void` — `this.turnUsage = mergeUsage(this.turnUsage ?? EMPTY_USAGE, delta)`
+  - `takeUsage(): Usage | undefined` — returns `this.turnUsage`
 - `translateStreamEvent`:
-  - `case "message_start"`: read `message.usage` fields, call `accumulator.setUsage(initialUsage)` where `initialUsage = { inputTokens: ..., outputTokens: 0, cacheReadTokens: ..., ...(cacheWrite > 0 ? { cacheWriteTokens: cacheWrite } : {}) }`.
-  - `case "message_delta"`: read `usage.output_tokens`, `usage.cache_read_input_tokens`; call `accumulator.mergeInUsage({ outputTokens: ..., cacheReadTokens: ... })`.
-  - `case "message_stop"`: include `usage: accumulator.takeUsage()` in the emitted event: `return [{ type: "message_stop", stopReason: accumulator.takeStopReason(), usage: accumulator.takeUsage() }];`
+  - `case "message_start"`: read `message.usage` fields, call `accumulator.setUsage(initialUsage)` where `initialUsage` is built via conditional spread (do NOT mutate a literal): `initialUsage = { inputTokens, outputTokens: 0, cacheReadTokens, ...(cacheWrite > 0 ? { cacheWriteTokens: cacheWrite } : {}) }`.
+  - `case "message_delta"`: read `usage.output_tokens`, `usage.cache_read_input_tokens`; call `accumulator.mergeInUsage({ inputTokens: 0, outputTokens, cacheReadTokens })`. (Pass a full `Usage`; the `> 0` guard in `mergeUsage` ensures the delta's `inputTokens: 0` does not clobber the real value from `message_start`.)
+  - `case "message_stop"`: emit `usage` **conditionally**: `const u = accumulator.takeUsage(); return [{ type: "message_stop", stopReason: accumulator.takeStopReason(), ...(u !== undefined ? { usage: u } : {}) }];`
+
+**Usage attachment is conditional on BOTH providers.** This corrects an asymmetry in an earlier draft (Anthropic emitted `usage` unconditionally, OpenAI conditionally). With `takeUsage(): Usage | undefined` on both accumulators and a conditional spread at both `message_stop` emit sites, the behavior is symmetric: `message_stop.usage` is present iff a usage-bearing event was seen this turn (always true on a completed turn; absent on a degenerate/interrupted turn). This (a) keeps the `message_stop` ProviderEvent shape backward-compatible for any test/mock that emits a bare `{ type: "message_stop", stopReason }`, and (b) minimizes test churn — only `message_stop` deep-equality assertions whose stream actually carries usage need updating. See §11 for the per-file test impact.
 
 **Anthropic field extraction guards:**
 - `message_start.message.usage.input_tokens`: read as `asNumber(usage.input_tokens)` — safe (non-null in SDK).
@@ -486,13 +489,15 @@ Add `function asNullableNumber(value: unknown): number | null { return typeof va
       
       // Capture usage from the final usage-only chunk (choices: [], usage: {...}).
       // This must happen BEFORE the choices.length === 0 return guard.
-      if (isRecord(chunk.usage) && chunk.usage != null) {
+      // `isRecord` already excludes null (the `usage: null` on non-final chunks),
+      // so no separate `!= null` guard is needed (honors verification note 7).
+      if (isRecord(chunk.usage)) {
         const u = chunk.usage;
         const ptDetails = isRecord(u.prompt_tokens_details) ? u.prompt_tokens_details : undefined;
         accumulator.setUsage({
           inputTokens: asNumber(u.prompt_tokens),
           outputTokens: asNumber(u.completion_tokens),
-          cacheReadTokens: ptDetails ? (asNumber(ptDetails.cached_tokens) ?? 0) : 0,
+          cacheReadTokens: ptDetails ? asNumber(ptDetails.cached_tokens) : 0,
         });
       }
       
@@ -531,8 +536,17 @@ Add `function asNullableNumber(value: unknown): number | null { return typeof va
 
 ## 11. Risks
 
-- **Risk: `agent_done`/`max_turns_exceeded`/`agent_error` shape change breaks existing tests.**
-  - **Mitigation:** The 196 existing tests use `MockProvider` and assert on terminal events. Tests that use deep-equality assertions on terminal events (e.g., `expect(event).toStrictEqual({ type: "agent_done", messages: [...] })`) will fail because the new `usage` field is missing from the expected object. The planner must scan all terminal-event assertions in `agent.test.ts`, `loop.test.ts`, and `agent-tooling-integration.test.ts` and add `usage: expect.any(Object)` or `usage: EMPTY_USAGE` to each. The `MockProvider` does not emit `message_stop` events with usage today — the loop will receive `undefined` for `event.usage` on `message_stop` and accumulate nothing, leaving `cumulativeUsage = { ...EMPTY_USAGE }`. All existing terminal events in tests will carry `EMPTY_USAGE`.
+- **Risk: making `usage` NON-optional on terminal events/`Terminal` breaks existing tests — and the worst breakages are COMPILE errors, not runtime mismatches.** (All test files live in `packages/core/src/__tests__/`.)
+  - **The hard breakers (TypeScript compile errors, TS2741 — these block the whole build, vitest included):** hand-built typed literals of `Terminal` / terminal `AgentEvent` that omit the now-required `usage`:
+    - `__tests__/collect.test.ts` — `Terminal` literals at **lines 18, 66, 82** (e.g. `const terminal: Terminal = { reason: "agent_done", messages: [] }`).
+    - `__tests__/types.test.ts` — `AgentEvent` literal at **line 65** and `Terminal` literal at **line 77**. (This file's test is titled "changed required fields break the build" — it is *designed* to fail on exactly this change.)
+    - **Action:** add `usage: EMPTY_USAGE` to all **5** literals. Until done, `pnpm typecheck`/`pnpm test` will not compile. These five were the ones an earlier draft of this risk list OMITTED.
+  - **The soft breakers (runtime `toEqual` mismatches):** deep-equality assertions on a whole terminal object. Most existing assertions are loose (`.type`/`.reason`/`.messages` field reads — e.g. throughout `agent.test.ts`, `loop.test.ts`, `agent-tooling-integration.test.ts`) and do NOT break. Scan for `toEqual`/`toStrictEqual`/`toMatchObject` on a full terminal object and add `usage: EMPTY_USAGE` (or `usage: expect.objectContaining({ inputTokens: ... })`).
+  - **Why `EMPTY_USAGE`:** `MockProvider` emits `message_stop` without usage, so the loop accumulates nothing and every existing test's terminal events carry `EMPTY_USAGE` (cumulative zero). Real-usage assertions belong only in the new mapper/loop tests that emit usage-bearing `message_stop`.
+  - **Source build-break surface is small and confined to `loop/loop.ts`** (the 3 terminal event/return pairs at `loop.ts:32/34`, `62/64`, `129/131`) plus the ONE new pre-flight `agent_error` this feature adds in `agent.ts`. `agent.ts` has no other terminal construction sites.
+
+- **Risk: `message_stop` deep-equality assertions break from the new (conditional) `usage` field — including in `anthropic-mapper.test.ts`.**
+  - **Mitigation:** Because usage is attached to `message_stop` only when captured (conditional on BOTH providers — see §9), the blast radius is limited to assertions whose stream actually carries usage. Known site: `__tests__/openai-mapper.test.ts:671` (`toEqual` on the flushed `message_stop` of a stream ending in a usage chunk). **The planner must ALSO scan `__tests__/anthropic-mapper.test.ts`** for `toEqual`/`toStrictEqual` on `message_stop` events whose `message_start`/`message_delta` carried usage — those now gain a `usage` field and need updating. Mocks/tests that emit a bare `{ type: "message_stop", stopReason }` (no usage in the stream) remain valid because attachment is conditional.
 
 - **Risk: `openai-mapper.test.ts` `mapRequest` assertions may fail on `stream_options`.**
   - **Mitigation:** Review the `mapRequest` tests. Currently none assert the absence of `stream_options`, but any test that checks the exact keys on the returned object (e.g., via `Object.keys`) will fail. The planner should audit and update these tests. Adding an assertion `expect(params.stream_options).toEqual({ include_usage: true })` is the correct fix.
@@ -568,7 +582,8 @@ Add `function asNullableNumber(value: unknown): number | null { return typeof va
 - [ ] `Terminal.usage` is the field-wise sum of all per-turn usages for the run.
 - [ ] OpenAI requests include `stream_options: { include_usage: true }`.
 - [ ] `mergeUsage` and `accumulateUsage` are pure (do not mutate inputs; return new objects).
-- [ ] All 196 existing tests continue to pass after updating terminal-event assertions to include `usage: EMPTY_USAGE` (since `MockProvider` emits no usage).
+- [ ] `pnpm typecheck` compiles after adding `usage: EMPTY_USAGE` to the 5 hand-built terminal/`Terminal` literals in `__tests__/collect.test.ts` (L18/66/82) and `__tests__/types.test.ts` (L65/77) — these are required-field compile errors, fix them first.
+- [ ] All 196 existing tests continue to pass after the above + updating any deep-equality terminal/`message_stop` assertions (incl. `__tests__/openai-mapper.test.ts:671` and any usage-bearing `message_stop` in `__tests__/anthropic-mapper.test.ts`) to include `usage` (since `MockProvider` emits no usage, terminal events carry `EMPTY_USAGE`).
 - [ ] The normalized `Usage` type is exported from `tiny-agentic`.
 
 **Non-functional:**
