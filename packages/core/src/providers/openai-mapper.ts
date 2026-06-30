@@ -1,5 +1,6 @@
 import type { ContentBlock, Message } from "../types/messages.js";
 import type { ProviderEvent, ProviderRequest, ToolSchema } from "../types/provider.js";
+import type { Usage } from "../types/usage.js";
 
 // Malformed streamed tool input (§6.1) is signalled provider-agnostically by the
 // optional `inputParseError: true` boolean on a tool_use ProviderEvent, with
@@ -39,6 +40,7 @@ export type OpenAIChatCompletionParams = {
   max_completion_tokens: number;
   messages: OpenAIChatMessage[];
   tools?: OpenAIFunctionTool[];
+  stream_options: { include_usage: true };
 };
 
 /** Map serialized ToolSchemas to OpenAI function tools (inputSchema → parameters). */
@@ -148,6 +150,7 @@ export function mapRequest(
     ],
     // Omit `tools` entirely when empty — some models reject an empty array.
     ...(request.tools.length > 0 ? { tools: mapTools(request.tools) } : {}),
+    stream_options: { include_usage: true as const },
   };
 }
 
@@ -164,6 +167,7 @@ export class ToolCallAccumulator {
   // keyed by tool_calls[].index
   private readonly calls = new Map<number, { id: string; name: string; args: string }>();
   private finishReason: string | undefined;
+  private chunkUsage: Usage | undefined;
 
   /**
    * Apply one chunk's `choices[0].delta`: emit any text fragment as text_delta[],
@@ -208,6 +212,11 @@ export class ToolCallAccumulator {
     this.finishReason = reason;
   }
 
+  /** Called when the final usage-only chunk is seen (chunk.choices === []). */
+  setUsage(u: Usage): void {
+    this.chunkUsage = u;
+  }
+
   /**
    * Called once at stream end. Returns the accumulated tool_use events in
    * ascending index order, then EXACTLY ONE message_stop. An empty argument
@@ -234,7 +243,11 @@ export class ToolCallAccumulator {
         });
       }
     }
-    events.push({ type: "message_stop", stopReason: mapFinishReason(this.finishReason) });
+    events.push({
+      type: "message_stop",
+      stopReason: mapFinishReason(this.finishReason),
+      ...(this.chunkUsage !== undefined ? { usage: this.chunkUsage } : {}),
+    });
     return events;
   }
 }
@@ -268,8 +281,22 @@ export function translateChunk(
   accumulator: ToolCallAccumulator,
 ): ProviderEvent[] {
   if (!isRecord(chunk)) return [];
+
+  // Capture usage from the final usage-only chunk (choices: [], usage: {...}).
+  // Must happen BEFORE the choices.length === 0 early-return.
+  // isRecord already excludes null — no separate != null guard needed.
+  if (isRecord(chunk.usage)) {
+    const u = chunk.usage;
+    const ptDetails = isRecord(u.prompt_tokens_details) ? u.prompt_tokens_details : undefined;
+    accumulator.setUsage({
+      inputTokens: asNumber(u.prompt_tokens),
+      outputTokens: asNumber(u.completion_tokens),
+      cacheReadTokens: ptDetails !== undefined ? asNumber(ptDetails.cached_tokens) : 0,
+    });
+  }
+
   const choices = chunk.choices;
-  if (!Array.isArray(choices) || choices.length === 0) return []; // include_usage chunk, etc.
+  if (!Array.isArray(choices) || choices.length === 0) return [];
 
   const choice = choices[0];
   if (!isRecord(choice)) return [];

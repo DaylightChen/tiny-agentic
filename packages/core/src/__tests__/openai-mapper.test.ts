@@ -124,6 +124,12 @@ describe("mapRequest — body shape", () => {
     const params = mapRequest(request, "gpt-4o", 32000);
     expect("tools" in params).toBe(false);
   });
+
+  it("always includes stream_options: { include_usage: true } regardless of request shape", () => {
+    const request: ProviderRequest = { systemPrompt: "s", messages: [], tools: [] };
+    const params = mapRequest(request, "gpt-4o", 32000);
+    expect(params.stream_options).toEqual({ include_usage: true });
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -668,7 +674,12 @@ describe("translateChunk — exactly one message_stop across a long mixed stream
     expect(out.filter((e) => e.type === "tool_use")).toHaveLength(2);
     expect(out.filter((e) => e.type === "text_delta")).toHaveLength(2);
     // The message_stop is last and reflects the tool_calls finish reason.
-    expect(out[out.length - 1]).toEqual({ type: "message_stop", stopReason: "tool_use" });
+    // After the usage-capture restructure, flush() includes usage from the usageChunk.
+    expect(out[out.length - 1]).toEqual({
+      type: "message_stop",
+      stopReason: "tool_use",
+      usage: { inputTokens: 10, outputTokens: 5, cacheReadTokens: 0 },
+    });
   });
 });
 
@@ -694,5 +705,99 @@ describe("translateChunk — malformed / non-record chunks", () => {
     expect(translateChunk({}, acc)).toEqual([]);
     expect(translateChunk({ choices: [] }, acc)).toEqual([]);
     expect(translateChunk({ choices: [null] }, acc)).toEqual([]);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Usage capture (task-06)
+// ---------------------------------------------------------------------------
+
+describe("translateChunk — usage capture", () => {
+  it("(a) usage chunk returns [] from translateChunk; flush emits message_stop with usage", () => {
+    const acc = new ToolCallAccumulator();
+    const result = translateChunk(
+      { choices: [], usage: { prompt_tokens: 20, completion_tokens: 10 } },
+      acc,
+    );
+    // Return value is [] — usage-only chunks never produce stream events.
+    expect(result).toEqual([]);
+
+    const flushed = acc.flush();
+    const stop = flushed.find((e) => e.type === "message_stop");
+    expect(stop).toBeDefined();
+    expect((stop as Extract<typeof stop, { type: "message_stop" }>)?.usage).toEqual({
+      inputTokens: 20,
+      outputTokens: 10,
+      cacheReadTokens: 0,
+    });
+
+    // Invariant: OpenAI never produces cacheWriteTokens — the key must be absent.
+    expect("cacheWriteTokens" in ((stop as Extract<typeof stop, { type: "message_stop" }>)?.usage ?? {})).toBe(false);
+  });
+
+  it("(b) usage: null on non-final chunk — accumulator not updated; flush message_stop has no usage key", () => {
+    const acc = new ToolCallAccumulator();
+    translateChunk({ choices: [{ delta: {}, finish_reason: null }], usage: null }, acc);
+    const flushed = acc.flush();
+    const stop = flushed.find((e) => e.type === "message_stop");
+    expect(stop).toBeDefined();
+    // isRecord(null) is false → usage branch skipped → no usage key on message_stop.
+    expect("usage" in stop!).toBe(false);
+  });
+
+  it("(c) prompt_tokens_details.cached_tokens maps to cacheReadTokens", () => {
+    const acc = new ToolCallAccumulator();
+    translateChunk(
+      {
+        choices: [],
+        usage: {
+          prompt_tokens: 30,
+          completion_tokens: 8,
+          prompt_tokens_details: { cached_tokens: 15 },
+        },
+      },
+      acc,
+    );
+    const flushed = acc.flush();
+    const stop = flushed.find((e) => e.type === "message_stop");
+    expect(stop).toBeDefined();
+    expect((stop as Extract<typeof stop, { type: "message_stop" }>)?.usage).toEqual({
+      inputTokens: 30,
+      outputTokens: 8,
+      cacheReadTokens: 15,
+    });
+  });
+
+  it("(d) absent prompt_tokens_details defaults cacheReadTokens to 0", () => {
+    const acc = new ToolCallAccumulator();
+    translateChunk(
+      { choices: [], usage: { prompt_tokens: 5, completion_tokens: 3 } },
+      acc,
+    );
+    const flushed = acc.flush();
+    const stop = flushed.find((e) => e.type === "message_stop");
+    expect((stop as Extract<typeof stop, { type: "message_stop" }>)?.usage?.cacheReadTokens).toBe(0);
+  });
+
+  it("(e) fresh accumulator with no usage chunk — flush message_stop has no usage key", () => {
+    const acc = new ToolCallAccumulator();
+    const flushed = acc.flush();
+    const stop = flushed.find((e) => e.type === "message_stop");
+    expect(stop).toBeDefined();
+    // setUsage was never called → chunkUsage is undefined → conditional spread omits usage.
+    expect("usage" in stop!).toBe(false);
+  });
+
+  it("(f) mapRequest always includes stream_options: { include_usage: true }", () => {
+    // Verified separately in the mapRequest describe block; cross-check here with tools present.
+    const request: ProviderRequest = {
+      systemPrompt: "s",
+      messages: [],
+      tools: [sampleTool],
+    };
+    const params = mapRequest(request, "gpt-4o-mini", 16000);
+    expect(params.stream_options).toEqual({ include_usage: true });
+    // stream flag is still absent (the provider adds it, not mapRequest).
+    expect("stream" in params).toBe(false);
   });
 });
