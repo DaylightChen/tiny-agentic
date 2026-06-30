@@ -5,7 +5,7 @@
 > The machine-readable source of truth is `docs/.phased-dev/scopes/feature/core-run-controls.json`.
 
 ## Current Phase
-**implement** (complete — awaiting approval)
+**implement** (complete) — ✅ feature workflow finished
 
 ## Last Completed
 - task-07-examples — done (`8f9d06b`), 1 iteration. Both examples typecheck against the built package. **All 7 tasks complete.**
@@ -19,7 +19,8 @@
 Final feature state: build + **253/253 tests** + typecheck + lint all clean. Both Anthropic + OpenAI deliver token usage end-to-end; external `AbortSignal` on `Agent.run()`.
 
 ## What's Next
-- Run `/phased-dev:advance-phase` to finalize the `implement` phase (terminal — completes the feature workflow).
+- ✅ Feature workflow complete (approved 2026-06-30). No further phases for this scope.
+- Next core work: Sub-agent / `Task` tool (Tier-1 #4) — start with `/phased-dev:start-feature task-tool`.
 
 ## Task Progress
 
