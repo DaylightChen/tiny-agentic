@@ -5,13 +5,13 @@
 > The machine-readable source of truth is `docs/.phased-dev/scopes/feature/core-run-controls.json`.
 
 ## Current Phase
-**plan** (not started)
+**plan** (complete — awaiting approval)
 
 ## Last Completed
-- `engineering` approved (2026-06-30): spec + resolved review-addendum; 11 decisions. Final-reviewed by 2 verifiers (real tsc compile; all 9 precision notes honored); 4 corrections folded into the spec.
+- `plan` written: `docs/feature/core-run-controls/plan/implementation-plan.md` + 6 task briefs. Order: usage-foundation → type-changes+test-fixes → external-abort-signal → loop-accumulation → anthropic-usage-capture → openai-usage-capture. Build-green invariant preserved (task-02 collapses the type change + compile-breaking literal fixes).
 
 ## What's Next
-- Run `/phased-dev:start-phase` to dispatch the planner for the `plan` phase.
+- Review the plan + briefs, then run `/phased-dev:advance-phase` to move to `implement` (then `/phased-dev:start-task 01`).
 
 ## Task Progress
 _(appears after the `plan` phase produces task briefs)_
