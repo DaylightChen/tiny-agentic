@@ -3,6 +3,7 @@ import type { Platform } from "../types/platform.js";
 import type { AgentEvent, Terminal } from "../types/events.js";
 import type { Message, ContentBlock } from "../types/messages.js";
 import type { ApprovalHandler, ToolCallContext } from "../types/tool.js";
+import { EMPTY_USAGE } from "../types/usage.js";
 import { ToolRegistry } from "../tools/registry.js";
 import { runTools } from "./runTools.js";
 import { serializeToolResult } from "../utils/serialize.js";
@@ -29,9 +30,9 @@ export async function* agentLoop(params: LoopParams): AsyncGenerator<AgentEvent,
   while (true) {
     // Guard
     if (turnsUsed >= maxTurns) {
-      const event = { type: "max_turns_exceeded" as const, turnsUsed, messages: workingMessages };
+      const event = { type: "max_turns_exceeded" as const, turnsUsed, messages: workingMessages, usage: EMPTY_USAGE };
       yield event;
-      return { reason: "max_turns_exceeded", turnsUsed, messages: workingMessages };
+      return { reason: "max_turns_exceeded", turnsUsed, messages: workingMessages, usage: EMPTY_USAGE };
     }
 
     // Stream model
@@ -59,9 +60,9 @@ export async function* agentLoop(params: LoopParams): AsyncGenerator<AgentEvent,
       }
     } catch (err) {
       const error = err instanceof Error ? err : new Error(String(err));
-      const event = { type: "agent_error" as const, error, messages: workingMessages };
+      const event = { type: "agent_error" as const, error, messages: workingMessages, usage: EMPTY_USAGE };
       yield event;
-      return { reason: "agent_error", error, messages: workingMessages };
+      return { reason: "agent_error", error, messages: workingMessages, usage: EMPTY_USAGE };
     }
 
     // Accumulate assistant turn
@@ -126,9 +127,9 @@ export async function* agentLoop(params: LoopParams): AsyncGenerator<AgentEvent,
     } else {
       // Natural completion
       yield { type: "turn_complete", turnIndex };
-      const event = { type: "agent_done" as const, messages: workingMessages };
+      const event = { type: "agent_done" as const, messages: workingMessages, usage: EMPTY_USAGE };
       yield event;
-      return { reason: "agent_done", messages: workingMessages };
+      return { reason: "agent_done", messages: workingMessages, usage: EMPTY_USAGE };
     }
   }
 }

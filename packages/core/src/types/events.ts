@@ -1,4 +1,5 @@
 import type { Message } from "./messages.js";
+import type { Usage } from "./usage.js";
 
 /**
  * All events yielded by Agent.run().
@@ -17,13 +18,13 @@ export type AgentEvent =
   | { type: "text_delta";         text: string }
   | { type: "tool_use_start";     toolName: string; toolInput: unknown }
   | { type: "tool_result";        toolName: string; toolCallId: string; result: unknown; isError: boolean }
-  | { type: "turn_complete";      turnIndex: number }
+  | { type: "turn_complete";      turnIndex: number; usage?: Usage }
   // Terminal events — the generator exhausts after yielding one of these.
   // Each carries `messages` so a `for await` consumer can thread history
   // without capturing the generator's return value.
-  | { type: "agent_done";         messages: Message[] }
-  | { type: "max_turns_exceeded"; turnsUsed: number; messages: Message[] }
-  | { type: "agent_error";        error: Error; messages: Message[] };
+  | { type: "agent_done";         messages: Message[]; usage: Usage }
+  | { type: "max_turns_exceeded"; turnsUsed: number; messages: Message[]; usage: Usage }
+  | { type: "agent_error";        error: Error; messages: Message[]; usage: Usage };
 
 /**
  * The generator's typed return value. Equivalent to the terminal AgentEvent.
@@ -31,6 +32,6 @@ export type AgentEvent =
  * For `.next()` consumers: read the generator's done.value.
  */
 export type Terminal =
-  | { reason: "agent_done";         messages: Message[] }
-  | { reason: "max_turns_exceeded"; messages: Message[]; turnsUsed: number }
-  | { reason: "agent_error";        messages: Message[]; error: Error };
+  | { reason: "agent_done";         messages: Message[]; usage: Usage }
+  | { reason: "max_turns_exceeded"; messages: Message[]; turnsUsed: number; usage: Usage }
+  | { reason: "agent_error";        messages: Message[]; error: Error; usage: Usage };

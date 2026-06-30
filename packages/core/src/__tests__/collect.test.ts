@@ -2,6 +2,7 @@ import { describe, it, expect } from "vitest";
 
 import { collectText, collectEvents } from "../utils/collect.js";
 import type { AgentEvent, Terminal } from "../types/events.js";
+import { EMPTY_USAGE } from "../types/usage.js";
 
 /**
  * Build a mock AsyncGenerator that yields the given events in order,
@@ -15,7 +16,7 @@ async function* mockGen(
   return terminal;
 }
 
-const terminal: Terminal = { reason: "agent_done", messages: [] };
+const terminal: Terminal = { reason: "agent_done", messages: [], usage: EMPTY_USAGE };
 
 describe("collectText", () => {
   it("returns the joined text from text_delta events", async () => {
@@ -63,7 +64,7 @@ describe("collectEvents", () => {
       { type: "tool_use_start", toolName: "read", toolInput: { path: "x" } },
       { type: "turn_complete", turnIndex: 0 },
     ];
-    const term: Terminal = { reason: "agent_done", messages: [] };
+    const term: Terminal = { reason: "agent_done", messages: [], usage: EMPTY_USAGE };
 
     const result = await collectEvents(mockGen(events, term));
 
@@ -83,6 +84,7 @@ describe("collectEvents", () => {
       reason: "max_turns_exceeded",
       messages: [{ role: "assistant", content: "stopped" }],
       turnsUsed: 3,
+      usage: EMPTY_USAGE,
     };
     const result = await collectEvents(mockGen([], term));
     expect(result.terminal).toEqual(term);

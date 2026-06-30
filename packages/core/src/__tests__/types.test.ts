@@ -11,6 +11,7 @@ import type {
 } from "../types/messages.js";
 import type { AgentEvent, Terminal } from "../types/events.js";
 import type { ProviderEvent, ProviderRequest, ToolSchema } from "../types/provider.js";
+import { EMPTY_USAGE } from "../types/usage.js";
 
 describe("defineTool", () => {
   it("preserves name/description and produces a usable Zod inputSchema", () => {
@@ -62,7 +63,7 @@ describe("type export surface (compile-time literal construction)", () => {
 
     const message: Message = { role: "assistant", content: blocks };
 
-    const agentDone: AgentEvent = { type: "agent_done", messages: [message] };
+    const agentDone: AgentEvent = { type: "agent_done", messages: [message], usage: EMPTY_USAGE };
 
     // tool_use ProviderEvent WITH the refined-design `inputParseError` field —
     // asserts the optional flag exists on the type (no PARSE_ERROR sentinel).
@@ -74,7 +75,7 @@ describe("type export surface (compile-time literal construction)", () => {
       inputParseError: true,
     };
 
-    const terminal: Terminal = { reason: "agent_done", messages: [message] };
+    const terminal: Terminal = { reason: "agent_done", messages: [message], usage: EMPTY_USAGE };
 
     const request: ProviderRequest = {
       systemPrompt: "sys",
