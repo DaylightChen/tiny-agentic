@@ -5,13 +5,13 @@
 > The machine-readable source of truth is `docs/.phased-dev/scopes/feature/core-run-controls.json`.
 
 ## Current Phase
-**research** (complete — awaiting approval)
+**engineering** (not started)
 
 ## Last Completed
-- `research` findings written: `docs/feature/core-run-controls/research/2026-06-30-core-run-controls-research.md`. 8 open questions handed to engineering.
+- `research` approved (2026-06-30) after max-effort verification (3 verifiers, 0 claims refuted; AbortSignal.any proven to typecheck). Outputs: main research doc + Claude Code usage reference + verification addendum. Usage-surface = Option A (locked in decisions.md).
 
 ## What's Next
-- Review the research doc, then run `/phased-dev:advance-phase` to move to `engineering`.
+- Run `/phased-dev:start-phase` to dispatch the feature-architect for the `engineering` phase.
 
 ## Task Progress
 _(appears after the `plan` phase produces task briefs)_

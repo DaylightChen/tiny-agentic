@@ -31,8 +31,8 @@
       ]
     }
   ],
-  "currentPhase": "research",
-  "phaseStatus": "complete_awaiting_approval",
+  "currentPhase": "engineering",
+  "phaseStatus": "not_started",
   "paths": {
     "researchDir": "docs/feature/core-run-controls/research/",
     "engineeringDir": "docs/feature/core-run-controls/engineering/",
@@ -40,5 +40,7 @@
     "tasks": "docs/feature/core-run-controls/tasks/",
     "decisions": "docs/feature/core-run-controls/decisions.md"
   },
-  "history": []
+  "history": [
+    { "phase": "research", "completedAt": "2026-06-30T00:00:00Z", "approvedAt": "2026-06-30T00:00:00Z", "note": "Research approved after a max-effort adversarial verification. Outputs: research/2026-06-30-core-run-controls-research.md (8 open questions), research/2026-06-30-claude-code-usage-reference.md (reference deep-dive), research/2026-06-30-verification-addendum.md (3 independent verifiers vs real code + SDK .d.ts — 0 claims refuted; proved AbortSignal.any() type-checks under lib:[ES2022] via real tsc; 9 engineering precision notes). User decision locked in decisions.md: token-usage surface = Option A (cumulative usage on terminal events + Terminal, normalized cross-provider shape, merge/accumulate helpers), mirroring Claude Code; Terminal.usage is the sub-agent Task-tool roll-up seam." }
+  ]
 }
