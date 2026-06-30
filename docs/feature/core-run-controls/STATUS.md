@@ -5,13 +5,13 @@
 > The machine-readable source of truth is `docs/.phased-dev/scopes/feature/core-run-controls.json`.
 
 ## Current Phase
-**engineering** (complete — awaiting approval)
+**plan** (not started)
 
 ## Last Completed
-- `engineering` spec written: `docs/feature/core-run-controls/engineering/2026-06-30-core-run-controls-engineering.md`. All 8 open questions resolved; 8 new decisions logged; honors the 9 verified precision notes.
+- `engineering` approved (2026-06-30): spec + resolved review-addendum; 11 decisions. Final-reviewed by 2 verifiers (real tsc compile; all 9 precision notes honored); 4 corrections folded into the spec.
 
 ## What's Next
-- Review the engineering spec, then run `/phased-dev:advance-phase` to move to `plan`.
+- Run `/phased-dev:start-phase` to dispatch the planner for the `plan` phase.
 
 ## Task Progress
 _(appears after the `plan` phase produces task briefs)_
