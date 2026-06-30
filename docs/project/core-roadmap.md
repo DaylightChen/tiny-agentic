@@ -45,24 +45,26 @@ Feature history: M1 core (`docs/project/`), `openai-provider` feature, `agent-to
 
 - Add `run(prompt, { signal })` (extend `RunOptions`) that links an external signal into the internal controller.
 - Small, clean, pure-core; composes directly with the cancellation threading built in `agent-tooling`.
+- Doubles as a **sub-agent enabler** (#4): a parent must be able to cancel a child run.
+
+### 4. Sub-agent / `Task` tool  ⭐ prioritized (2026-06-30)
+
+A built-in tool that runs a **nested `Agent`** with its own tool set and turn budget, returning a summarized result to the parent. Promoted from Tier 2 to Tier 1 as the next core feature to pursue — it is the capability that turns "an agent" into "an agent framework."
+
+- The brainstorm flagged sub-agents as core.
+- Largest Tier-1 lift. Design points to settle: the `Task` tool wraps a nested `Agent` instance; parent/child isolation (separate history, tool set, `maxTurns`); how child progress surfaces to the parent stream (summarized final result vs. forwarded events); and a **recursion-depth guard** so an agent can't spawn children unboundedly.
+- Leans on the other Tier-1 items as enablers: **external `AbortSignal` (#3)** to propagate cancellation to children, and **token usage (#2)** to roll child usage up into the parent. Neither is a hard blocker, but landing #3 (and ideally #2) first makes the Task tool cleaner.
 
 ---
 
 ## Tier 2 — core, medium value
 
-### 4. Concurrent execution of concurrency-safe tools
+### 5. Concurrent execution of concurrency-safe tools
 
 The `isConcurrencySafe?(input)` hook already exists on the `Tool` interface (`packages/core/src/types/tool.ts`, reserved in M1, currently unused). `runTools` executes tools strictly sequentially.
 
 - Let read-only tools (`read_file`, `grep`, `ls`) in the same turn run in parallel; keep stateful tools (`bash`, `edit_file`, `write_file`) sequential.
 - Real latency win; the seam is already present, so this is mostly loop logic + a batching strategy.
-
-### 5. Sub-agent / `Task` tool
-
-A built-in tool that runs a **nested `Agent`** with its own tool set and turn budget, returning a summarized result to the parent.
-
-- The brainstorm flagged sub-agents as core. This is the largest Tier-2 lift but is the capability that turns "an agent" into "an agent framework."
-- Interacts with Tier-1 #2 (usage roll-up) and #3 (signal propagation to children).
 
 ---
 
@@ -78,10 +80,13 @@ A built-in tool that runs a **nested `Agent`** with its own tool set and turn bu
 
 ## Recommended sequencing
 
-1. **`fs-discovery-tools`** (Tier-1 #1) — the highest-impact core feature; carries the anticipated `Platform` method additions. Fold in **token usage (#2)** and **external signal (#3)** since both are small, pure-core, and unblock later work.
-2. **Concurrent tool execution** (#4) — once more read-only tools exist to benefit from it.
-3. **Sub-agent `Task` tool** (#5) — when the single-agent core is feature-complete.
-4. Then shift to the **SDK layer** (`packages/sdk`): permission policy engine, context compaction (on top of #2), sessions/memory/skills.
+> Reordered 2026-06-30 to prioritize the sub-agent `Task` tool (#4).
+
+1. **External `AbortSignal` on `run()` (#3)** + **token usage in events (#2)** — small, pure-core, and the enablers the Task tool builds on (child cancellation + usage roll-up). Land these first.
+2. **Sub-agent `Task` tool (#4)** ⭐ — the prioritized core feature; nests an `Agent` behind a tool with parent/child isolation and a recursion-depth guard.
+3. **`fs-discovery-tools` (#1)** — high-impact `ls`/`glob`/`grep` + the anticipated `Platform` method additions; gives both the parent and its sub-agents real filesystem reach.
+4. **Concurrent tool execution (#5)** — once more read-only tools exist to benefit from it.
+5. Then shift to the **SDK layer** (`packages/sdk`): permission policy engine, context compaction (on top of #2), sessions/memory/skills.
 
 ## Explicitly deferred (already logged)
 
