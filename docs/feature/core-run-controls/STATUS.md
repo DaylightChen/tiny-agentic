@@ -5,13 +5,13 @@
 > The machine-readable source of truth is `docs/.phased-dev/scopes/feature/core-run-controls.json`.
 
 ## Current Phase
-**research** (in progress)
+**research** (complete — awaiting approval)
 
 ## Last Completed
-_(none yet)_
+- `research` findings written: `docs/feature/core-run-controls/research/2026-06-30-core-run-controls-research.md`. 8 open questions handed to engineering.
 
 ## What's Next
-- Researcher is gathering evidence for the `research` phase. Review its output, then run `/phased-dev:advance-phase` to move to `engineering`.
+- Review the research doc, then run `/phased-dev:advance-phase` to move to `engineering`.
 
 ## Task Progress
 _(appears after the `plan` phase produces task briefs)_
