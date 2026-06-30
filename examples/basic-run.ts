@@ -17,6 +17,7 @@ import {
   editFileTool,
   type Message,
   type ApprovalHandler,
+  type Usage,
 } from "tiny-agentic";
 import { AnthropicProvider } from "tiny-agentic/providers/anthropic";
 import { NodePlatform } from "tiny-agentic/platform/node";
@@ -26,6 +27,11 @@ const apiKey = process.env["ANTHROPIC_API_KEY"];
 if (!apiKey) {
   console.error("Error: ANTHROPIC_API_KEY environment variable is required.");
   process.exit(1);
+}
+
+function formatUsage(u: Usage): string {
+  const cw = u.cacheWriteTokens !== undefined ? `, cacheWrite=${u.cacheWriteTokens}` : "";
+  return `in=${u.inputTokens} out=${u.outputTokens} cacheRead=${u.cacheReadTokens}${cw}`;
 }
 
 const provider = new AnthropicProvider({
@@ -163,6 +169,46 @@ for await (const event of toolAgent.run(
       break;
     case "max_turns_exceeded":
       console.error("\n[max turns exceeded]");
+      break;
+  }
+}
+
+// --- Turn 5a: token usage ---
+console.log("\n=== Turn 5a: token usage ===");
+for await (const event of agent.run("In one sentence, what is an AbortSignal?")) {
+  switch (event.type) {
+    case "text_delta": process.stdout.write(event.text); break;
+    case "turn_complete":
+      if (event.usage) console.log(`\n[turn ${event.turnIndex} usage: ${formatUsage(event.usage)}]`);
+      break;
+    case "agent_done":
+      console.log(`\n[done — cumulative usage: ${formatUsage(event.usage)}]`);
+      break;
+    case "agent_error": console.error("\n[agent error]", event.error.message); break;
+    case "max_turns_exceeded": console.error("\n[max turns]"); break;
+  }
+}
+
+// --- Turn 5b: external AbortSignal (cancel mid-run) ---
+console.log("\n=== Turn 5b: external AbortSignal (cancel mid-run) ===");
+// Alternative timeout form: agent.run(prompt, { signal: AbortSignal.timeout(2000) })
+const controller = new AbortController();
+let aborted = false;
+for await (const event of agent.run(
+  "Write a detailed 5-paragraph essay about distributed systems.",
+  { signal: controller.signal },
+)) {
+  switch (event.type) {
+    case "text_delta":
+      process.stdout.write(event.text);
+      if (!aborted) { aborted = true; controller.abort(); } // cancel as soon as output starts
+      break;
+    case "agent_error":
+      console.log(`\n[run cancelled as expected → agent_error: ${event.error.message}]`);
+      console.log(`[partial usage at cancel: ${formatUsage(event.usage)}]`);
+      break;
+    case "agent_done":
+      console.log(`\n[completed before abort took effect — usage: ${formatUsage(event.usage)}]`);
       break;
   }
 }
