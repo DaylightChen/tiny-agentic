@@ -5,7 +5,7 @@
 > The machine-readable source of truth is `docs/.phased-dev/scopes/feature/agent-tooling.json`.
 
 ## Current Phase
-**implement** (complete — awaiting approval)
+**implement** (complete) — ✅ **FEATURE COMPLETE** (terminal phase; workflow finished 2026-06-30)
 
 ## Last Completed
 - task-05-wiring-and-exports — done (`70bd7b3`), 1 iteration. 196/196 tests, build + typecheck + lint clean. **Feature complete.**
@@ -15,7 +15,7 @@
 - task-01-type-and-platform-foundations — done (`1b58b86`), 2 iterations.
 
 ## What's Next
-- All 5 tasks complete. Run `/phased-dev:advance-phase` to finalize the `implement` phase (terminal phase — completes the feature workflow).
+- Feature workflow complete — no further phases. Optional follow-ups: push / open a PR for the branch commits; pick up the next core feature from `docs/project/core-roadmap.md`.
 
 ## Task Progress
 
