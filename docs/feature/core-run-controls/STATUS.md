@@ -5,28 +5,33 @@
 > The machine-readable source of truth is `docs/.phased-dev/scopes/feature/core-run-controls.json`.
 
 ## Current Phase
-**implement** (not started)
+**implement** (complete — awaiting approval)
 
 ## Last Completed
-- `plan` approved (2026-06-30): `docs/feature/core-run-controls/plan/implementation-plan.md` + 7 task briefs.
+- task-07-examples — done (`8f9d06b`), 1 iteration. Both examples typecheck against the built package. **All 7 tasks complete.**
+- task-06-openai-usage-capture — done (`37bc833`), 1 iteration.
+- task-05-anthropic-usage-capture — done (`b7fda53`), 1 iteration.
+- task-04-loop-accumulation — done (`376c548`), 1 iteration.
+- task-03-external-abort-signal — done (`e7b26d4`), 1 iteration.
+- task-02-type-changes-and-test-fixes — done (`ae2800d`), 1 iteration.
+- task-01-usage-foundation — done (`da5cbb5`), 1 iteration.
+
+Final feature state: build + **253/253 tests** + typecheck + lint all clean. Both Anthropic + OpenAI deliver token usage end-to-end; external `AbortSignal` on `Agent.run()`.
 
 ## What's Next
-- Run `/phased-dev:start-task 01` to begin the per-task dev loop (implement → test → review → fix).
+- Run `/phased-dev:advance-phase` to finalize the `implement` phase (terminal — completes the feature workflow).
 
 ## Task Progress
 
 | # | Task | Status |
 |---|------|--------|
-| 01 | task-01-usage-foundation | pending |
-| 02 | task-02-type-changes-and-test-fixes | pending |
-| 03 | task-03-external-abort-signal | pending |
-| 04 | task-04-loop-accumulation | pending |
-| 05 | task-05-anthropic-usage-capture | pending |
-| 06 | task-06-openai-usage-capture | pending |
-| 07 | task-07-examples | pending |
-
-## Task Progress
-_(appears after the `plan` phase produces task briefs)_
+| 01 | task-01-usage-foundation | done (`da5cbb5`) |
+| 02 | task-02-type-changes-and-test-fixes | done (`ae2800d`) |
+| 03 | task-03-external-abort-signal | done (`e7b26d4`) |
+| 04 | task-04-loop-accumulation | done (`376c548`) |
+| 05 | task-05-anthropic-usage-capture | done (`b7fda53`) |
+| 06 | task-06-openai-usage-capture | done (`37bc833`) |
+| 07 | task-07-examples | done (`8f9d06b`) |
 
 ## Blockers
 None

@@ -32,7 +32,7 @@
     }
   ],
   "currentPhase": "implement",
-  "phaseStatus": "not_started",
+  "phaseStatus": "complete_awaiting_approval",
   "paths": {
     "researchDir": "docs/feature/core-run-controls/research/",
     "engineeringDir": "docs/feature/core-run-controls/engineering/",
