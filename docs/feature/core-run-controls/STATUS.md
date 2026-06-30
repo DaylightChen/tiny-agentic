@@ -5,13 +5,25 @@
 > The machine-readable source of truth is `docs/.phased-dev/scopes/feature/core-run-controls.json`.
 
 ## Current Phase
-**plan** (complete — awaiting approval)
+**implement** (not started)
 
 ## Last Completed
-- `plan` written: `docs/feature/core-run-controls/plan/implementation-plan.md` + 7 task briefs. Order: usage-foundation → type-changes+test-fixes → external-abort-signal → loop-accumulation → anthropic-usage-capture → openai-usage-capture → examples (run-controls demo for both providers). Build-green invariant preserved (task-02 collapses the type change + compile-breaking literal fixes).
+- `plan` approved (2026-06-30): `docs/feature/core-run-controls/plan/implementation-plan.md` + 7 task briefs.
 
 ## What's Next
-- Review the plan + briefs, then run `/phased-dev:advance-phase` to move to `implement` (then `/phased-dev:start-task 01`).
+- Run `/phased-dev:start-task 01` to begin the per-task dev loop (implement → test → review → fix).
+
+## Task Progress
+
+| # | Task | Status |
+|---|------|--------|
+| 01 | task-01-usage-foundation | pending |
+| 02 | task-02-type-changes-and-test-fixes | pending |
+| 03 | task-03-external-abort-signal | pending |
+| 04 | task-04-loop-accumulation | pending |
+| 05 | task-05-anthropic-usage-capture | pending |
+| 06 | task-06-openai-usage-capture | pending |
+| 07 | task-07-examples | pending |
 
 ## Task Progress
 _(appears after the `plan` phase produces task briefs)_
