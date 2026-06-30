@@ -19,3 +19,6 @@ export { writeFileTool } from "./tools/builtin/writeFile.js";
 export { bashTool } from "./tools/builtin/bash.js";
 export { editFileTool } from "./tools/builtin/editFile.js";
 export type { ApprovalDecision, ApprovalHandler } from "./types/tool.js";
+
+export type { Usage } from "./types/usage.js";
+export { EMPTY_USAGE, mergeUsage, accumulateUsage } from "./types/usage.js";
