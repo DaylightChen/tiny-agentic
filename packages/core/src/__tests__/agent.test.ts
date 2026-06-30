@@ -5,8 +5,10 @@ import { Agent } from "../agent.js";
 import { defineTool } from "../types/tool.js";
 import { readFileTool } from "../tools/builtin/readFile.js";
 import { collectEvents } from "../utils/collect.js";
+import { EMPTY_USAGE } from "../types/usage.js";
 import type { Provider, ProviderEvent, ProviderRequest } from "../types/provider.js";
 import type { Platform, ExecResult } from "../types/platform.js";
+import type { AgentEvent, Terminal } from "../types/events.js";
 import type { Message, ContentBlock } from "../types/messages.js";
 
 /**
@@ -331,5 +333,211 @@ describe("Agent.run", () => {
     // The loop recovered and reached natural completion.
     expect(terminal.reason).toBe("agent_done");
     expect(events.at(-1)?.type).toBe("agent_done");
+  });
+});
+
+describe("Agent.run — AbortSignal", () => {
+  /**
+   * (a) Pre-aborted signal → immediate agent_error, provider.stream never called.
+   *
+   * Verifies that when an already-aborted signal is passed the pre-flight guard
+   * fires: the FIRST and ONLY yielded event is agent_error; the Terminal reason is
+   * "agent_error"; provider.stream was NEVER invoked (buildEnvContext / agentLoop
+   * were skipped entirely); and the usage on the error event is EMPTY_USAGE.
+   */
+  it("pre-aborted signal → only event is agent_error and provider.stream is not called (§3.4)", async () => {
+    const ctrl = new AbortController();
+    ctrl.abort();
+
+    const provider = new MockProvider([
+      [
+        { type: "text_delta", text: "should not be reached" },
+        { type: "message_stop", stopReason: "end_turn" },
+      ],
+    ]);
+    const agent = new Agent({ provider, tools: [], platform: new MockPlatform() });
+
+    const { events, terminal } = await collectEvents(agent.run("test", { signal: ctrl.signal }));
+
+    // The FIRST and ONLY event is agent_error.
+    expect(events).toHaveLength(1);
+    expect(events[0]?.type).toBe("agent_error");
+
+    // Terminal carries the error reason.
+    expect(terminal.reason).toBe("agent_error");
+
+    // Provider stream was never invoked — buildEnvContext / agentLoop were skipped.
+    expect(provider.requests).toHaveLength(0);
+
+    // The agent_error event carries EMPTY_USAGE (no tokens consumed).
+    if (events[0]?.type !== "agent_error") throw new Error("expected agent_error event");
+    expect(events[0].usage).toEqual(EMPTY_USAGE);
+
+    // Terminal usage is also EMPTY_USAGE.
+    if (terminal.reason !== "agent_error") throw new Error("unreachable");
+    expect(terminal.usage).toEqual(EMPTY_USAGE);
+  });
+
+  /**
+   * (a) Pre-aborted signal — abort reason forwarded as error message.
+   *
+   * When abort() is called with an Error argument, the error message is preserved
+   * rather than falling back to the generic "Run aborted before start" text.
+   */
+  it("pre-aborted signal with Error reason → error message is preserved (§3.4)", async () => {
+    const ctrl = new AbortController();
+    const reason = new Error("caller cancelled");
+    ctrl.abort(reason);
+
+    const provider = new MockProvider([]);
+    const agent = new Agent({ provider, tools: [], platform: new MockPlatform() });
+
+    const { events, terminal } = await collectEvents(agent.run("test", { signal: ctrl.signal }));
+
+    expect(events).toHaveLength(1);
+    if (events[0]?.type !== "agent_error") throw new Error("expected agent_error event");
+    expect(events[0].error.message).toBe("caller cancelled");
+    expect(terminal.reason).toBe("agent_error");
+  });
+
+  /**
+   * (a) Pre-aborted signal — non-Error reason falls back to generic message.
+   *
+   * When abort() is called with a non-Error reason (string, undefined, etc.), the
+   * fallback message "Run aborted before start" is used.
+   */
+  it("pre-aborted signal with non-Error reason → fallback error message (§3.4)", async () => {
+    const ctrl = new AbortController();
+    ctrl.abort("some string reason");
+
+    const provider = new MockProvider([]);
+    const agent = new Agent({ provider, tools: [], platform: new MockPlatform() });
+
+    const { events, terminal } = await collectEvents(agent.run("test", { signal: ctrl.signal }));
+
+    expect(events).toHaveLength(1);
+    if (events[0]?.type !== "agent_error") throw new Error("expected agent_error event");
+    expect(events[0].error.message).toBe("Run aborted before start");
+    expect(terminal.reason).toBe("agent_error");
+  });
+
+  /**
+   * (b) No signal → run completes normally.
+   *
+   * Sanity check that omitting the signal entirely does not regress normal
+   * completion. terminal.reason must be "agent_done".
+   */
+  it("no signal → run completes normally with agent_done (§3.1)", async () => {
+    const provider = new MockProvider([
+      [
+        { type: "text_delta", text: "hello" },
+        { type: "message_stop", stopReason: "end_turn" },
+      ],
+    ]);
+    const agent = new Agent({ provider, tools: [], platform: new MockPlatform() });
+
+    // Deliberately call with no second argument — exercising the "no signal" path.
+    const { terminal } = await collectEvents(agent.run("test"));
+
+    expect(terminal.reason).toBe("agent_done");
+    // Provider was called normally.
+    expect(provider.requests).toHaveLength(1);
+  });
+
+  /**
+   * (b) Empty options object (no signal property) → run completes normally.
+   *
+   * Verifies exactOptionalPropertyTypes compliance: passing {} must not cause a
+   * compile error or runtime misbehaviour.
+   */
+  it("empty options object → run completes normally with agent_done (exactOptionalPropertyTypes)", async () => {
+    const provider = new MockProvider([
+      [
+        { type: "text_delta", text: "hi" },
+        { type: "message_stop", stopReason: "end_turn" },
+      ],
+    ]);
+    const agent = new Agent({ provider, tools: [], platform: new MockPlatform() });
+
+    // Pass an explicit empty options object — must compile and run without error.
+    const { terminal } = await collectEvents(agent.run("test", {}));
+
+    expect(terminal.reason).toBe("agent_done");
+  });
+
+  /**
+   * (c) Mid-run abort → terminal reason is agent_error.
+   *
+   * Uses a provider that yields one text_delta then throws when the signal is
+   * aborted — mirroring real provider behaviour (Anthropic SDK, fetch, etc.).
+   * The key: the provider checks `signal.aborted` synchronously at the start of
+   * its blocking Promise constructor. This means that even if abort fires in the
+   * for-await consumer's body (before the outer generator's next .next() call is
+   * processed), the provider correctly throws on its next resumption.
+   *
+   * Abort is issued from outside (external ctrl) after observing the first
+   * text_delta. The agentLoop's catch block converts the thrown error into
+   * agent_error, giving terminal.reason === "agent_error".
+   *
+   * Note: usage will be EMPTY_USAGE because this provider does not emit a
+   * usage-bearing message_stop — usage wiring comes in task-04.
+   */
+  it("mid-run abort → terminal reason is agent_error with abort-related error (§3.1)", async () => {
+    // A provider that yields one text_delta, then throws when the signal aborts —
+    // modelling how real streaming providers (fetch, Anthropic SDK) behave.
+    //
+    // Critical: the `signal.aborted` pre-check inside the Promise constructor runs
+    // synchronously when the generator is resumed. If abort already fired (e.g.
+    // in the preceding for-await body), the Promise rejects immediately without
+    // needing microtask scheduling, so the outer iterator.next() call sees the
+    // throw in the same tick it processes the abort.
+    class AbortThrowingProvider implements Provider {
+      async *stream(_req: ProviderRequest, signal?: AbortSignal): AsyncGenerator<ProviderEvent> {
+        yield { type: "text_delta", text: "partial" };
+        await new Promise<never>((_resolve, reject) => {
+          // Pre-check: abort may have fired synchronously before this resumption.
+          if (signal!.aborted) {
+            reject(new DOMException("signal aborted", "AbortError"));
+            return;
+          }
+          const onAbort = (): void => {
+            signal!.removeEventListener("abort", onAbort);
+            reject(new DOMException("signal aborted", "AbortError"));
+          };
+          signal!.addEventListener("abort", onAbort);
+        });
+      }
+    }
+
+    const ctrl = new AbortController();
+    const provider = new AbortThrowingProvider();
+    const agent = new Agent({ provider, tools: [], platform: new MockPlatform() });
+
+    // Drive the iterator manually. After consuming text_delta, call ctrl.abort()
+    // synchronously, then call iterator.next() again. Because the provider's
+    // Promise constructor checks signal.aborted synchronously, it immediately
+    // rejects, causing the agentLoop's catch to yield agent_error.
+    const collectedEvents: AgentEvent[] = [];
+    let terminal!: Terminal;
+    const iterator = agent.run("test", { signal: ctrl.signal })[Symbol.asyncIterator]();
+
+    while (true) {
+      const result = await iterator.next();
+      if (result.done) {
+        terminal = result.value;
+        break;
+      }
+      collectedEvents.push(result.value);
+      if (result.value.type === "text_delta") {
+        ctrl.abort();
+      }
+    }
+
+    // The run must terminate with an error reason.
+    expect(terminal.reason).toBe("agent_error");
+
+    // The terminal carries a real Error (the thrown DOMException/AbortError).
+    if (terminal.reason !== "agent_error") throw new Error("unreachable");
+    expect(terminal.error).toBeInstanceOf(Error);
   });
 });

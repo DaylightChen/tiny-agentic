@@ -6,6 +6,7 @@ import type { Message } from "./types/messages.js";
 import { ToolRegistry } from "./tools/registry.js";
 import { buildEnvContext } from "./env/context.js";
 import { agentLoop } from "./loop/loop.js";
+import { EMPTY_USAGE } from "./types/usage.js";
 
 export type AgentOptions = {
   provider: Provider;
@@ -18,6 +19,7 @@ export type AgentOptions = {
 
 export type RunOptions = {
   messages?: Message[];
+  signal?: AbortSignal;
 };
 
 export class Agent {
@@ -39,7 +41,21 @@ export class Agent {
 
   async *run(prompt: string, options: RunOptions = {}): AsyncGenerator<AgentEvent, Terminal> {
     const abortCtrl = new AbortController();
+    const signal = options.signal !== undefined
+      ? AbortSignal.any([options.signal, abortCtrl.signal])
+      : abortCtrl.signal;
     try {
+      if (signal.aborted) {
+        const error = new Error(
+          signal.reason instanceof Error
+            ? signal.reason.message
+            : "Run aborted before start"
+        );
+        const event = { type: "agent_error" as const, error, messages: options.messages ?? [], usage: EMPTY_USAGE };
+        yield event;
+        return { reason: "agent_error", error, messages: options.messages ?? [], usage: EMPTY_USAGE };
+      }
+
       const registry = new ToolRegistry(this.tools);
       const workingMessages: Message[] = [
         ...(options.messages ?? []),
@@ -55,7 +71,7 @@ export class Agent {
         messages: workingMessages,
         systemPrompt,
         maxTurns: this.maxTurns,
-        signal: abortCtrl.signal,
+        signal,
         ...(this.approvalHandler !== undefined ? { approvalHandler: this.approvalHandler } : {}),
       });
     } finally {
