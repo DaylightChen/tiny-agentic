@@ -16,7 +16,7 @@ plan — completed and approved at 2026-07-01T22:50:37+08:00
 ## Task Progress
 | # | Task | Status |
 |---|------|--------|
-| 01 | types-surface | pending |
+| 01 | types-surface | done (`f3c61ec`) |
 | 02 | loop-seams | pending |
 | 03 | task-tool-factory | pending |
 | 04 | boundary-guarantee | pending |
