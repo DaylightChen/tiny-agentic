@@ -5,16 +5,22 @@
 > The machine-readable source of truth is `docs/.phased-dev/scopes/feature/task-tool.json`.
 
 ## Current Phase
-**research** (not started)
+**implement** (not started)
 
 ## Last Completed
-_(none yet)_
+plan — completed and approved at 2026-07-01T22:50:37+08:00
 
 ## What's Next
-- Run `/phased-dev:start-phase` to begin the `research` phase
+- Run `/phased-dev:start-task <NN>` to execute a task
 
 ## Task Progress
-_(appears after the `plan` phase produces task briefs)_
+| # | Task | Status |
+|---|------|--------|
+| 01 | types-surface | pending |
+| 02 | loop-seams | pending |
+| 03 | task-tool-factory | pending |
+| 04 | boundary-guarantee | pending |
+| 05 | smoke-and-docs | pending |
 
 <!-- Example:
 | # | Task | Status |
