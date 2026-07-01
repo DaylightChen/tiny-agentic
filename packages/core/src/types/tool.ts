@@ -1,5 +1,7 @@
 import type { ZodType, z } from "zod";
 import type { Platform } from "./platform.js";
+import type { Usage } from "./usage.js";
+import type { SubagentChildEvent } from "./events.js";
 
 /**
  * Extensible context object passed to every Tool.call invocation.
@@ -15,6 +17,19 @@ import type { Platform } from "./platform.js";
  */
 export interface ToolCallContext {
   signal?: AbortSignal;  // populated by agentLoop; tools forward to Platform.exec
+  /** Report token usage consumed by work a tool performed out-of-band (e.g. a
+   *  child Agent run). agentLoop folds this into the run's cumulative usage
+   *  after the tool batch. Safe to call multiple times; each call accumulates. */
+  reportUsage?: (usage: Usage) => void;
+  /** Emit a sanitized child event onto the parent's stream from inside a tool.
+   *  Used by the task tool to surface the child's lifecycle. In v1 the loop
+   *  buffers these and yields them (wrapped as `subagent_event`) immediately
+   *  before the tool's `tool_result`. Never carries child `messages`. */
+  emitEvent?: (event: SubagentChildEvent) => void;
+  /** The tool-use id of the call currently executing. Populated by the loop per
+   *  tool-use so a tool can correlate emitted events / logs to its own call
+   *  (the task tool uses it as `taskId`). Absent for tools that don't need it. */
+  toolCallId?: string;
 }
 
 /**
