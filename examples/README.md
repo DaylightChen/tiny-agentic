@@ -44,3 +44,20 @@ OPENAI_API_KEY=sk-… pnpm tsx examples/openai-run.ts
 ```
 
 Without `OPENAI_API_KEY` set, the script prints an error and exits 1 (a token-free way to confirm the wiring resolves). The model id is `gpt-4o-mini`; any valid Chat Completions model works, including reasoning models (o-series / GPT-5), since `maxTokens` maps to `max_completion_tokens`.
+
+## `task-run.ts`
+
+A sub-agent (`task` tool) smoke: a parent agent delegates a self-contained sub-task to a **child agent running on a different model id** (`claude-opus-4-8` parent → `claude-haiku-4-5` child), streaming the child's sanitized `subagent_event`s tagged by `taskId` and printing the rolled-up parent `usage` (which includes the child's tokens). The child's tool set omits the `task` tool — the structural recursion bound.
+
+### Run it
+
+Requires a real Anthropic API key and Node >= 22. Optionally exercises a cross-provider (OpenAI) child when `OPENAI_API_KEY` is also set; otherwise a `provider: "openai"` hint demonstrates the clean config-error path.
+
+```bash
+# from the repo root
+pnpm install
+pnpm --filter tiny-agentic build      # the example imports the built package + provider entries
+ANTHROPIC_API_KEY=sk-ant-… pnpm tsx examples/task-run.ts
+```
+
+Without `ANTHROPIC_API_KEY` set, the script prints an error and exits 1. Not run in CI.
