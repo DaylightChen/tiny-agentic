@@ -18,6 +18,9 @@ export { readFileTool } from "./tools/builtin/readFile.js";
 export { writeFileTool } from "./tools/builtin/writeFile.js";
 export { bashTool } from "./tools/builtin/bash.js";
 export { editFileTool } from "./tools/builtin/editFile.js";
+export { createTaskTool } from "./tools/builtin/task.js";
+export type { CreateTaskToolOptions, ChildSpec } from "./tools/builtin/task.js";
+export type { SubagentChildEvent } from "./types/events.js";
 export type { ApprovalDecision, ApprovalHandler } from "./types/tool.js";
 
 export type { Usage } from "./types/usage.js";
