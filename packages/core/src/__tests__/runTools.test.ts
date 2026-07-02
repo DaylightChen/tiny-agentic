@@ -254,6 +254,79 @@ describe("runTools", () => {
   });
 });
 
+describe("runTools — toolCallId correlation (task-02)", () => {
+  it("sets context.toolCallId to the current tool-use id during the call", async () => {
+    let seen: string | undefined = "UNSET";
+    const tool = defineTool({
+      name: "capture_id",
+      description: "captures its toolCallId",
+      inputSchema: z.object({}).passthrough(),
+      call: async (_input, _platform, context) => {
+        seen = context.toolCallId;
+        return "ok";
+      },
+    });
+    const localCtx: ToolCallContext = {};
+
+    await collect(
+      runTools([{ id: "abc-123", name: "capture_id", input: {} }], makeRegistry([tool]), new MockPlatform(), localCtx),
+    );
+
+    expect(seen).toBe("abc-123");
+  });
+
+  it("clears context.toolCallId after the batch (finally), so it does not leak past the call", async () => {
+    const tool = defineTool({
+      name: "capture_id",
+      description: "captures its toolCallId",
+      inputSchema: z.object({}).passthrough(),
+      call: async () => "ok",
+    });
+    const localCtx: ToolCallContext = {};
+
+    await collect(
+      runTools([{ id: "abc-123", name: "capture_id", input: {} }], makeRegistry([tool]), new MockPlatform(), localCtx),
+    );
+
+    // Cleared via `delete` in the finally — the property must be ABSENT, not
+    // merely undefined, so a later observer sees no stale correlation id.
+    expect(localCtx.toolCallId).toBeUndefined();
+    expect("toolCallId" in localCtx).toBe(false);
+  });
+
+  it("does not leak a prior tool-use id into a later call after an early-return branch", async () => {
+    // First entry is an unknown tool (early `continue` before any call). The
+    // finally must still clear toolCallId so the SECOND tool observes its own
+    // id, not the unknown tool's "unknown-1".
+    let seenBySecond: string | undefined = "UNSET";
+    const second = defineTool({
+      name: "second",
+      description: "records the toolCallId it observes",
+      inputSchema: z.object({}).passthrough(),
+      call: async (_input, _platform, context) => {
+        seenBySecond = context.toolCallId;
+        return "ok";
+      },
+    });
+    const localCtx: ToolCallContext = {};
+
+    await collect(
+      runTools(
+        [
+          { id: "unknown-1", name: "no_such_tool", input: {} },
+          { id: "second-2", name: "second", input: {} },
+        ],
+        makeRegistry([second]),
+        new MockPlatform(),
+        localCtx,
+      ),
+    );
+
+    expect(seenBySecond).toBe("second-2");
+    expect("toolCallId" in localCtx).toBe(false);
+  });
+});
+
 describe("approvalHandler gate", () => {
   it("no handler (undefined) — tool.call is invoked and success result yielded", async () => {
     // Explicit undefined (omitted 5th arg) is the blanket-allow default.
