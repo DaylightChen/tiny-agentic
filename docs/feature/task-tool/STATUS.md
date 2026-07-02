@@ -17,7 +17,7 @@ plan — completed and approved at 2026-07-01T22:50:37+08:00
 | # | Task | Status |
 |---|------|--------|
 | 01 | types-surface | done (`f3c61ec`) |
-| 02 | loop-seams | pending |
+| 02 | loop-seams | done (`fe397ee`) |
 | 03 | task-tool-factory | pending |
 | 04 | boundary-guarantee | pending |
 | 05 | smoke-and-docs | pending |
