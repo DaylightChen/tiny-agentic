@@ -19,7 +19,7 @@ plan — completed and approved at 2026-07-01T22:50:37+08:00
 | 01 | types-surface | done (`f3c61ec`) |
 | 02 | loop-seams | done (`fe397ee`) |
 | 03 | task-tool-factory | done (`ce80fff`) |
-| 04 | boundary-guarantee | pending |
+| 04 | boundary-guarantee | done (`b2db97f`) |
 | 05 | smoke-and-docs | pending |
 
 <!-- Example:
