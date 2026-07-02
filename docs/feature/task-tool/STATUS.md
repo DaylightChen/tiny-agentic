@@ -5,13 +5,13 @@
 > The machine-readable source of truth is `docs/.phased-dev/scopes/feature/task-tool.json`.
 
 ## Current Phase
-**implement** (not started)
+**implement** (complete)
 
 ## Last Completed
-plan — completed and approved at 2026-07-01T22:50:37+08:00
+implement — all 5 tasks complete at 2026-07-02T11:33:30+08:00. Feature fully implemented.
 
 ## What's Next
-- Run `/phased-dev:start-task <NN>` to execute a task
+- Feature `task-tool` is complete. No further phase.
 
 ## Task Progress
 | # | Task | Status |
@@ -20,7 +20,7 @@ plan — completed and approved at 2026-07-01T22:50:37+08:00
 | 02 | loop-seams | done (`fe397ee`) |
 | 03 | task-tool-factory | done (`ce80fff`) |
 | 04 | boundary-guarantee | done (`b2db97f`) |
-| 05 | smoke-and-docs | pending |
+| 05 | smoke-and-docs | done (`3733cde`) |
 
 <!-- Example:
 | # | Task | Status |
