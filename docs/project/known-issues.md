@@ -52,10 +52,41 @@
 
 ---
 
-## Sub-agent / `task` tool: numeric depth guard deferred (feature/task-tool)
+## Sub-agent / `task` tool: numeric depth guard — RESOLVED (feature/task-tool)
 
 **Discovered:** 2026-07-02 (implement, feature/task-tool Task 05)
-**Status:** open (deferred by design, E2 / R2)
-**Symptom:** v1 bounds recursion **structurally only** — `resolveChild` must omit the `task` tool from the children it builds, so a correct host cannot spawn beyond depth 1. There is no numeric `depth`/`maxDepth` counter. A host that *deliberately* wires a child agent with the `task` tool re-included is not caught by a second, counter-based guard in v1.
-**Workaround:** Honor the documented contract — do not include the `task` tool in a child's tool set. The example `resolveChild` (in `examples/task-run.ts`) comments this bound.
-**Revisit when:** A host needs guaranteed-bounded *deep* nesting (depth > 1) with a numeric cap. Recorded design candidate: seed `context.depth` inside the loop and have `createTaskTool` read it to enforce a cap. This needs the child loop to receive a starting depth, which requires crossing the intentionally-closed `Agent.run(prompt, { messages?, signal? })` boundary that v1 avoids — so it is a deliberate, separate design change, not a quick add.
+**Resolved:** 2026-07-02 (post-review hardening, review item D1)
+**Status:** resolved
+**Symptom (original):** v1 bounded recursion **structurally only** — `resolveChild` must omit the `task` tool from the children it builds — with no numeric backstop. A host that *deliberately* (or accidentally, by reusing the parent's tool array) re-included the `task` tool was caught by no second guard and could recurse until `maxTurns`, multiplicatively across depth.
+**Resolution:** A numeric backstop was added. `agentLoop` seeds `context.depth` (0 at the top level) from a new optional `RunOptions.depth`; the `task` tool drives each child at `depth + 1` and refuses to spawn when `context.depth >= maxDepth` (new `createTaskTool({ maxDepth })` option, **default 1**), returning `"Sub-agent depth limit reached (maxDepth=N); refusing to spawn a nested sub-agent."` with zero child tokens spent. This crosses the previously-closed `Agent.run` boundary via a single optional, `@internal`-documented field (decision 2026-07-02). The structural bound (omit `task`) remains the primary protection; the counter is a safety net. Covered by tests T-cov-2a/b/c in `task-tool.test.ts`.
+**Revisit when:** N/A (resolved). If deep guarded nesting is wanted, raise `maxDepth` per `task` tool.
+
+---
+
+## Sub-agent / `task` tool: child events are not real-time (feature/task-tool)
+
+**Discovered:** 2026-07-02 (post-review hardening, review item D2 / spec R3)
+**Status:** open (accepted limitation, v1)
+**Symptom:** A consumer sees NONE of a child's `text_delta`/tool events while the child runs; they arrive as a batch of `subagent_event`s immediately BEFORE the spawning call's `tool_result`. In-flight nested runs are opaque on the parent stream. This is inherent to v1's collect-then-flush model: `Tool.call` is awaited, so a tool cannot yield onto the parent stream mid-call.
+**Workaround:** For coarse progress, read the batched `subagent_event`s (correctly ordered, `taskId`-correlated). There is no live child-delta stream in v1.
+**Revisit when:** Live child observability is needed. The upgrade is additive — it changes WHEN events are yielded, not the `SubagentChildEvent` shape: restructure `runTools` into a concurrent producer/consumer (an async queue) so a tool can surface events as the child streams. Deferred because that is a real complexity/correctness cost the headline feature does not require.
+
+---
+
+## Sub-agent / `task` tool: `break` does not cancel an in-flight child (feature/task-tool)
+
+**Discovered:** 2026-07-02 (post-review hardening, review item D3)
+**Status:** open (documented behavior)
+**Symptom:** A consumer that wires a "stop" button to breaking the `for await` loop finds it unresponsive for the entire child run. While a `task` tool's `call` is awaited, the parent generator has no yield point, so the consumer's `.return()` is queued behind the still-pending child `.next()`: the child runs to completion and the run's teardown `abort` fires too late to interrupt it.
+**Workaround:** To cancel in-flight sub-agent work promptly, abort the run `signal` you passed to `agent.run(prompt, { signal })`. That cascades into the child at once (confirmed by test T-cov-1). Use the signal, not `break`, for sub-agent cancellation.
+**Revisit when:** Prompt cancellation of an awaited tool call is needed — the same structural change as real-time child events above (a yielding/concurrent `runTools`).
+
+---
+
+## Sub-agent / `task` tool: child usage absent from `turn_complete` (feature/task-tool)
+
+**Discovered:** 2026-07-02 (post-review hardening, review item I3)
+**Status:** open (accepted observability gap)
+**Symptom:** Child token spend surfaces only in the run's cumulative `usage` on the TERMINAL event, and per-child on each `subagent_event`(terminal)'s `usage`. It is NEVER included in any `turn_complete.usage`, which carries the parent's own per-turn tokens only. A consumer building a live token meter by summing `turn_complete.usage` deltas under-counts by the entire child spend.
+**Workaround:** For live child cost, read each `subagent_event`(terminal)'s `usage`; for the authoritative running total, read the terminal event's cumulative `usage`. Do not reconstruct cost from `turn_complete` alone.
+**Revisit when:** A live, child-inclusive per-turn usage signal is wanted; would require attributing folded child usage onto `turn_complete` (a small additive change if a consumer needs it).

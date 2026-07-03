@@ -26,10 +26,16 @@ export interface ToolCallContext {
    *  buffers these and yields them (wrapped as `subagent_event`) immediately
    *  before the tool's `tool_result`. Never carries child `messages`. */
   emitEvent?: (event: SubagentChildEvent) => void;
-  /** The tool-use id of the call currently executing. Populated by the loop per
-   *  tool-use so a tool can correlate emitted events / logs to its own call
-   *  (the task tool uses it as `taskId`). Absent for tools that don't need it. */
+  /** The tool-use id of the call currently executing. Set by `runTools` for
+   *  every call during execution (and cleared immediately after), so a tool can
+   *  correlate emitted events / logs to its own call (the task tool uses it as
+   *  `taskId`). Absent only outside a call (between tool-uses / batches). */
   toolCallId?: string;
+  /** Current sub-agent recursion depth: 0 at the top level, incremented by one
+   *  for each nested `Agent.run`. Seeded by `agentLoop` from `RunOptions.depth`.
+   *  The `task` tool reads it to enforce its `maxDepth` backstop against runaway
+   *  nested spawning, and passes `depth + 1` to the child it drives. */
+  depth?: number;
 }
 
 /**

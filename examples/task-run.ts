@@ -63,7 +63,10 @@ function resolveChild(spec: ChildSpec): Agent {
   return new Agent({
     provider: childProvider,
     // The child's tool set deliberately OMITS the `task` tool — this is the
-    // structural recursion bound (a sub-agent cannot spawn a sub-agent).
+    // primary (structural) recursion bound: a sub-agent cannot spawn a sub-agent.
+    // A numeric backstop also exists (createTaskTool's `maxDepth`, default 1),
+    // which bounds a misconfigured resolver that re-includes `task`; the
+    // structural omission here is still the bound you should rely on.
     tools: [],
     platform: new NodePlatform(),
     systemPrompt: "You are a focused sub-agent. Do the task and report a short summary.",

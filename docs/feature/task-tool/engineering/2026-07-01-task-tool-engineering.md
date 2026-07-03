@@ -5,6 +5,8 @@
 > Primary, binding artifact for this feature. Supersedes the empty template stub at `docs/feature/task-tool/engineering/engineering.md`.
 >
 > **Rev 2 (2026-07-01, self-review fixes).** Six blocking issues resolved: (1) `resolveChild` is **mandatory** for v1 — no core default resolver (a default cannot reach the parent's private provider/tools); (2) the parent/child boundary is enforced by a **sanitized `SubagentChildEvent` union** that omits `messages`, not the full `AgentEvent` (which carries child transcript on terminals); (3) `taskId` correlation is made concrete via a new `context.toolCallId`; (4) child events are **batched before the `tool_result`** in v1 (no real-time delta promise); (5) the **numeric depth guard is deferred** — v1 relies solely on the structural bound (child tool set excludes `task`), so no `Agent.run` widening and no `maxDepth`/`depth` plumbing; (6) a **Test plan** section maps invariants to tests. Non-blocking: model example corrected, `model`/`provider` clarified as opaque strings, stray `spawn?` removed.
+>
+> **Rev 4 (2026-07-02, post-review hardening).** After the adversarial review (`../review-2026-07-02-task-tool-review.md`), two items below were **superseded** — see the living record in `../decisions.md` (2026-07-02): (a) the **numeric depth guard is no longer deferred** (Rev 2 item 5 / R2) — a backstop was implemented via an optional `RunOptions.depth` + `context.depth` + `createTaskTool({ maxDepth })` (default 1), so `Agent.run` gains one optional `@internal` field; (b) the required model-facing **`description` input was dropped** (it was a dead "for logging" contract), so the Microcopy section's `description` field no longer applies. The body below is the historical 2026-07-01 snapshot.
 
 ## Goal
 

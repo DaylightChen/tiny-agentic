@@ -17,12 +17,15 @@ export type LoopParams = {
   maxTurns: number;
   signal: AbortSignal;
   approvalHandler?: ApprovalHandler;
+  /** Sub-agent recursion depth for this run (0 at the top level). Seeded onto
+   *  `context.depth` so the `task` tool can enforce its `maxDepth` backstop. */
+  depth?: number;
 };
 
 export async function* agentLoop(params: LoopParams): AsyncGenerator<AgentEvent, Terminal> {
   const { provider, registry, platform, systemPrompt, maxTurns, signal, approvalHandler } = params;
   const workingMessages = params.messages; // mutable local copy
-  const context: ToolCallContext = { signal };
+  const context: ToolCallContext = { signal, depth: params.depth ?? 0 };
   const toolSchemas = registry.toSchemas();
   let turnIndex = 0;
   let turnsUsed = 0;
@@ -162,13 +165,27 @@ export async function* agentLoop(params: LoopParams): AsyncGenerator<AgentEvent,
 
       workingMessages.push({ role: "user", content: toolResultBlocks });
 
-      // Fold tool-reported usage into the run total exactly once, after the
-      // batch, before the turn boundary — so a consumer reading turn_complete
-      // sees a consistent cumulative state. Usage rolls up from reportUsage
-      // ONLY; emitted child events are for observation, never accounting (E5).
+      // Fold tool-reported usage into the RUN's cumulative total exactly once,
+      // after the batch. This total surfaces on the terminal event's `usage`
+      // (agent_done / max_turns_exceeded / agent_error) — NOT on `turn_complete`,
+      // whose `usage` is the parent's own per-turn tokens and never includes
+      // child spend. A consumer building a live cost meter must therefore read
+      // child cost from each `subagent_event` terminal's `usage`; summing
+      // `turn_complete.usage` alone under-counts by the entire child spend.
+      // Usage rolls up from reportUsage ONLY; emitted child events are for
+      // observation, never accounting (E5).
       for (const u of reportedUsage) {
         cumulativeUsage = accumulateUsage(cumulativeUsage, u);
       }
+
+      // Clear the per-batch sinks now that the batch is drained and folded,
+      // mirroring the per-call `delete context.toolCallId` in runTools. Tools
+      // call these synchronously within their awaited `call`, so nothing needs
+      // them after this point; clearing stops a future fire-and-forget tool that
+      // retained `context` from pushing usage/events into a later turn's live
+      // buffer (misattributed taskId / double-counted usage).
+      delete context.reportUsage;
+      delete context.emitEvent;
 
       yield { type: "turn_complete", turnIndex, ...(turnUsage !== undefined ? { usage: turnUsage } : {}) };
       turnIndex++;

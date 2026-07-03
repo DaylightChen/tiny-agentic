@@ -20,6 +20,13 @@ export type AgentOptions = {
 export type RunOptions = {
   messages?: Message[];
   signal?: AbortSignal;
+  /**
+   * @internal Current sub-agent recursion depth (0 at the top level). Threaded
+   * by the built-in `task` tool, which passes `depth + 1` when it drives a
+   * child so `createTaskTool`'s `maxDepth` backstop can bound nested spawning.
+   * Consumers running a top-level agent normally omit this (defaults to 0).
+   */
+  depth?: number;
 };
 
 export class Agent {
@@ -72,12 +79,18 @@ export class Agent {
         systemPrompt,
         maxTurns: this.maxTurns,
         signal,
+        depth: options.depth ?? 0,
         ...(this.approvalHandler !== undefined ? { approvalHandler: this.approvalHandler } : {}),
       });
     } finally {
       // If the consumer breaks out of the for-await loop, JS invokes the
-      // generator's .return() which runs this finally, aborting the in-flight
-      // provider stream.
+      // generator's .return(), which runs this finally and aborts this run's
+      // own controller — tearing down the in-flight provider stream at the next
+      // suspension point. NOTE: while a tool.call is awaited (e.g. the `task`
+      // tool driving a child), the parent generator has no yield point, so a
+      // `break` cannot interrupt that call — it resolves first, and only then
+      // does this abort fire. To cancel an in-flight sub-agent promptly, abort
+      // the run `signal` you passed in; that cascades into the child at once.
       abortCtrl.abort();
     }
   }

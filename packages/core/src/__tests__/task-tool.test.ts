@@ -72,6 +72,27 @@ class ImmediateThrowProvider implements Provider {
   }
 }
 
+/**
+ * Child provider that emits one chunk then BLOCKS until its signal aborts,
+ * honoring the signal (unlike MockProvider, which ignores it). On abort it
+ * rejects, so agentLoop maps it to an `agent_error` terminal. Used to prove the
+ * parent-abort → child cascade actually terminates an in-flight child mid-stream
+ * (T-cov-1 — the spec T8 scenario the existing tests only approximate).
+ */
+class BlockingSignalHonoringProvider implements Provider {
+  async *stream(_req: ProviderRequest, signal?: AbortSignal): AsyncGenerator<ProviderEvent> {
+    yield { type: "text_delta", text: "chunk-1" };
+    await new Promise<void>((_resolve, reject) => {
+      if (signal?.aborted) {
+        reject(new Error("aborted"));
+        return;
+      }
+      signal?.addEventListener("abort", () => reject(new Error("aborted")), { once: true });
+    });
+    // Unreachable: the promise above only ever rejects.
+  }
+}
+
 class MockPlatform implements Platform {
   cwd(): string {
     return "/work";
@@ -179,11 +200,17 @@ describe("createTaskTool — tool surface & microcopy", () => {
     expect(tool.name).toBe("delegate");
   });
 
-  it("validates required input fields (description + prompt) via the Zod schema", () => {
+  it("validates the required input field (prompt); description was dropped (D4)", () => {
     const tool = createTaskTool({ resolveChild: () => makeChild([]) });
-    expect(tool.inputSchema.safeParse({ description: "d", prompt: "p" }).success).toBe(true);
-    expect(tool.inputSchema.safeParse({ description: "d" }).success).toBe(false);
-    expect(tool.inputSchema.safeParse({ prompt: "p" }).success).toBe(false);
+    // prompt is the only required field now.
+    expect(tool.inputSchema.safeParse({ prompt: "p" }).success).toBe(true);
+    expect(tool.inputSchema.safeParse({}).success).toBe(false);
+    // Empty prompt is rejected (input hygiene — z.string().min(1)).
+    expect(tool.inputSchema.safeParse({ prompt: "" }).success).toBe(false);
+    // `description` is no longer in the schema: a stray one is stripped, not required.
+    const parsed = tool.inputSchema.safeParse({ description: "stray", prompt: "p" });
+    expect(parsed.success).toBe(true);
+    if (parsed.success) expect("description" in parsed.data).toBe(false);
   });
 });
 
@@ -203,7 +230,6 @@ describe("createTaskTool — T1-T9", () => {
       ]);
 
     const { events, terminal } = await runParent(resolveChild, {
-      description: "d",
       prompt: "do it",
     });
 
@@ -219,7 +245,7 @@ describe("createTaskTool — T1-T9", () => {
     const resolveChild = () =>
       makeChild([[{ type: "message_stop", stopReason: "end_turn" }]]);
 
-    const { events } = await runParent(resolveChild, { description: "d", prompt: "p" });
+    const { events } = await runParent(resolveChild, { prompt: "p" });
 
     const result = findTaskResult(events);
     expect(result.result).toBe("(sub-agent produced no output)");
@@ -237,7 +263,7 @@ describe("createTaskTool — T1-T9", () => {
 
     const { events, terminal } = await runParent(
       resolveChild,
-      { description: "d", prompt: "p" },
+      { prompt: "p" },
       {
         parentTurn1Usage: { inputTokens: 100, outputTokens: 50, cacheReadTokens: 0 },
         parentTurn2Usage: { inputTokens: 1, outputTokens: 1, cacheReadTokens: 0 },
@@ -273,7 +299,7 @@ describe("createTaskTool — T1-T9", () => {
         { tools: [okTool], maxTurns: 1 },
       );
 
-    const { events } = await runParent(resolveChild, { description: "d", prompt: "p" });
+    const { events } = await runParent(resolveChild, { prompt: "p" });
 
     const result = findTaskResult(events);
     expect(result.isError).toBe(false);
@@ -300,7 +326,7 @@ describe("createTaskTool — T1-T9", () => {
 
     const { events, terminal } = await runParent(
       resolveChild,
-      { description: "d", prompt: "p", provider: "x" },
+      { prompt: "p", provider: "x" },
       {
         parentTurn1Usage: { inputTokens: 100, outputTokens: 50, cacheReadTokens: 0 },
         parentTurn2Usage: { inputTokens: 1, outputTokens: 1, cacheReadTokens: 0 },
@@ -334,7 +360,6 @@ describe("createTaskTool — T1-T9", () => {
     };
 
     await runParent(resolveChild, {
-      description: "d",
       prompt: "p",
       model: "m",
       provider: "pr",
@@ -370,7 +395,7 @@ describe("createTaskTool — T1-T9", () => {
       ]);
     };
 
-    await runParent(resolveChild, { description: "d", prompt: "only-prompt" });
+    await runParent(resolveChild, { prompt: "only-prompt" });
 
     const spec = captured as ChildSpec;
     expect(Object.keys(spec).sort()).toEqual(["prompt", "signal"].sort());
@@ -405,7 +430,7 @@ describe("createTaskTool — T1-T9", () => {
     const parentController = new AbortController();
     const context: ToolCallContext = { signal: parentController.signal };
 
-    const result = await tool.call({ description: "d", prompt: "p" }, new MockPlatform(), context);
+    const result = await tool.call({ prompt: "p" }, new MockPlatform(), context);
     expect(result).toBe("child-ok");
 
     const spec = captured as ChildSpec;
@@ -434,7 +459,7 @@ describe("createTaskTool — T1-T9", () => {
 
     // The child errors -> the tool reports usage then throws the failed-microcopy.
     await expect(
-      tool.call({ description: "d", prompt: "p" }, new MockPlatform(), context),
+      tool.call({ prompt: "p" }, new MockPlatform(), context),
     ).rejects.toThrow("Sub-agent failed: network down");
 
     // The parent's signal is untouched by the child's failure (isolation).
@@ -446,7 +471,7 @@ describe("createTaskTool — T1-T9", () => {
     // Correct host behavior: the child Agent is built WITHOUT the task tool.
     const childScript: ProviderEvent[][] = [
       [
-        { type: "tool_use", id: "recurse1", name: "task", input: { description: "d", prompt: "again" } },
+        { type: "tool_use", id: "recurse1", name: "task", input: { prompt: "again" } },
         { type: "message_stop", stopReason: "tool_use" },
       ],
       [
@@ -477,7 +502,7 @@ describe("createTaskTool — T1-T9", () => {
       new Agent({
         provider: new MockProvider([
           [
-            { type: "tool_use", id: "recurse1", name: "task", input: { description: "d", prompt: "again" } },
+            { type: "tool_use", id: "recurse1", name: "task", input: { prompt: "again" } },
             { type: "message_stop", stopReason: "tool_use" },
           ],
           [
@@ -489,7 +514,7 @@ describe("createTaskTool — T1-T9", () => {
         platform: new MockPlatform(),
       });
 
-    const { events } = await runParent(resolveChild, { description: "d", prompt: "recurse" });
+    const { events } = await runParent(resolveChild, { prompt: "recurse" });
 
     const parentTaskResult = findTaskResult(events);
     expect(parentTaskResult.result).toBe("child final");
@@ -529,7 +554,7 @@ describe("createTaskTool — boundary invariants", () => {
         ],
       ]);
 
-    const { events } = await runParent(resolveChild, { description: "d", prompt: "p" });
+    const { events } = await runParent(resolveChild, { prompt: "p" });
 
     const terminalEvent = events.find(
       (e) => e.type === "subagent_event" && e.event.type === "terminal",
@@ -557,7 +582,7 @@ describe("createTaskTool — boundary invariants", () => {
         ],
       ]);
 
-    const { events } = await runParent(resolveChild, { description: "d", prompt: "p" });
+    const { events } = await runParent(resolveChild, { prompt: "p" });
 
     const subEvents = events.filter((e) => e.type === "subagent_event");
     expect(subEvents.length).toBeGreaterThan(0);
@@ -571,6 +596,145 @@ describe("createTaskTool — boundary invariants", () => {
         expect("result" in se.event).toBe(false);
       }
     }
+  });
+});
+
+// ===========================================================================
+// Review coverage — abort-mid-flight cascade (T-cov-1) and the numeric depth
+// backstop (T-cov-2, D1). These pin behavior the original suite left thin.
+// ===========================================================================
+
+describe("createTaskTool — abort cascade terminates an in-flight child (T-cov-1)", () => {
+  it(
+    "aborting the run signal mid-child terminates the child and the tool rejects (no hang)",
+    async () => {
+      const child = new Agent({
+        provider: new BlockingSignalHonoringProvider(),
+        tools: [],
+        platform: new MockPlatform(),
+      });
+      const resolveChild = (): Agent => child;
+      const tool = createTaskTool({ resolveChild });
+
+      const parentController = new AbortController();
+      const context: ToolCallContext = { signal: parentController.signal };
+
+      const callPromise = tool.call({ prompt: "p" }, new MockPlatform(), context);
+
+      // Let the child start streaming (emit chunk-1, then block on the signal).
+      await new Promise((r) => setTimeout(r, 10));
+      // Cancel via the run signal — the correct way to cancel in-flight sub-agent
+      // work (a consumer `break` would NOT interrupt this awaited call; D3).
+      parentController.abort();
+
+      // The child's provider honored the signal → agent_error → the tool surfaces
+      // the failed microcopy. Critically, it resolves at all: the per-test timeout
+      // means a broken cascade (child hangs) fails the test rather than hanging CI.
+      await expect(callPromise).rejects.toThrow(/^Sub-agent failed: /);
+    },
+    2000,
+  );
+});
+
+describe("createTaskTool — numeric depth backstop (T-cov-2, D1)", () => {
+  // Build a child that is MISCONFIGURED: its tool set wrongly includes a `task`
+  // tool (whose resolveChild would build a grandchild). The grandchild provider
+  // must never stream when the backstop fires.
+  function makeMisconfiguredChild(grandchildProvider: MockProvider, maxDepth?: number): Agent {
+    const childTaskTool = createTaskTool({
+      resolveChild: () =>
+        new Agent({ provider: grandchildProvider, tools: [], platform: new MockPlatform() }),
+      ...(maxDepth !== undefined ? { maxDepth } : {}),
+    });
+    return new Agent({
+      provider: new MockProvider([
+        [
+          { type: "tool_use", id: "g1", name: "task", input: { prompt: "spawn a grandchild" } },
+          { type: "message_stop", stopReason: "tool_use" },
+        ],
+        [
+          { type: "text_delta", text: "child final" },
+          { type: "message_stop", stopReason: "end_turn" },
+        ],
+      ]),
+      tools: [childTaskTool],
+      platform: new MockPlatform(),
+    });
+  }
+
+  it("T-cov-2a: a child run at depth 1 (default maxDepth 1) refuses to spawn — zero grandchild tokens", async () => {
+    const grandchildProvider = new MockProvider([
+      [
+        { type: "text_delta", text: "grandchild MUST NOT run" },
+        { type: "message_stop", stopReason: "end_turn" },
+      ],
+    ]);
+    const childDirect = makeMisconfiguredChild(grandchildProvider);
+
+    // Run at depth 1, simulating a sub-agent spawned by a parent.
+    const { events, terminal } = await collectEvents(childDirect.run("start", { depth: 1 }));
+
+    const taskResult = findTaskResult(events);
+    expect(taskResult.isError).toBe(true);
+    expect(taskResult.result).toBe(
+      "Sub-agent depth limit reached (maxDepth=1); refusing to spawn a nested sub-agent.",
+    );
+    // The backstop refuses BEFORE resolveChild/run: the grandchild never streamed.
+    expect(grandchildProvider.requests).toHaveLength(0);
+    // The child itself continues normally after its refused tool call.
+    expect(terminal.reason).toBe("agent_done");
+  });
+
+  it("T-cov-2b: through a parent (depth 0 → child depth 1), runaway spawning is bounded, not run to maxTurns", async () => {
+    const grandchildProvider = new MockProvider([
+      [
+        { type: "text_delta", text: "grandchild MUST NOT run" },
+        { type: "message_stop", stopReason: "end_turn" },
+      ],
+    ]);
+    const resolveChild = (): Agent => makeMisconfiguredChild(grandchildProvider);
+
+    const { events } = await runParent(resolveChild, { prompt: "delegate" });
+
+    // Parent's task result is the child's final text — the child completed after
+    // its own nested `task` attempt was refused by the backstop.
+    const parentResult = findTaskResult(events);
+    expect(parentResult.result).toBe("child final");
+    expect(parentResult.isError).toBe(false);
+
+    // The child's refused attempt surfaces as an isError tool_result child event.
+    const refusal = events.find(
+      (e) =>
+        e.type === "subagent_event" &&
+        e.event.type === "tool_result" &&
+        e.event.toolName === "task",
+    );
+    if (refusal?.type !== "subagent_event") {
+      throw new Error("expected a subagent_event for the refused task attempt");
+    }
+    if (refusal.event.type !== "tool_result") throw new Error("unreachable");
+    expect(refusal.event.isError).toBe(true);
+
+    // No grandchild ever streamed — the depth backstop stopped the runaway.
+    expect(grandchildProvider.requests).toHaveLength(0);
+  });
+
+  it("T-cov-2c: maxDepth is configurable — maxDepth:2 lets a depth-1 child spawn a depth-2 grandchild", async () => {
+    const grandchildProvider = new MockProvider([
+      [
+        { type: "text_delta", text: "grandchild ran" },
+        { type: "message_stop", stopReason: "end_turn" },
+      ],
+    ]);
+    const childDirect = makeMisconfiguredChild(grandchildProvider, 2);
+
+    const { events } = await collectEvents(childDirect.run("start", { depth: 1 }));
+
+    // At depth 1 with maxDepth 2: 1 >= 2 is false → spawn allowed.
+    const taskResult = findTaskResult(events);
+    expect(taskResult.isError).toBe(false);
+    expect(taskResult.result).toBe("grandchild ran");
+    expect(grandchildProvider.requests).toHaveLength(1);
   });
 });
 
