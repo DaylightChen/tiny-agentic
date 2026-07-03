@@ -61,3 +61,26 @@ ANTHROPIC_API_KEY=sk-ant-… pnpm tsx examples/task-run.ts
 ```
 
 Without `ANTHROPIC_API_KEY` set, the script prints an error and exits 1. Not run in CI.
+
+## `subagent-registry.ts`
+
+A `subagent_type` → tool-set registry. The reference (Claude Code) lets the model pick a **named agent type** but never a tool array — the type's tools are fixed by agent-definition frontmatter (`tools:` / `disallowedTools:`) and resolved by `resolveAgentTools`. This example builds the same shape **imperatively in host code**:
+
+- `AGENT_REGISTRY` maps each label (`researcher`, `editor`, `writer`) to a fixed profile (tool set + system prompt + optional model).
+- `formatAgentCatalog()` injects the menu — each type and the tools it has — into the parent's system prompt, mirroring Claude Code's generated "Available agent types and the tools they have access to:" section. Without it the model can't know which types exist, since the `task` schema only offers an opaque `subagent_type` string.
+- `resolveChild()` looks up the chosen label and builds the child with that profile's tools; unknown labels throw a clean config-error result.
+
+The run delegates two sub-tasks that resolve to **different profiles** (read `package.json` → `researcher` with `[read_file]`; draft a blurb → `writer` with no tools), so the per-child tool lines in the stream differ — the registry routing, made visible. The takeaway: the LLM passes only a label; the host owns the tools.
+
+### Run it
+
+Requires a real Anthropic API key and Node >= 22.
+
+```bash
+# from the repo root
+pnpm install
+pnpm --filter tiny-agentic build      # the example imports the built dist via the exports map
+ANTHROPIC_API_KEY=sk-ant-… pnpm tsx examples/subagent-registry.ts
+```
+
+Without `ANTHROPIC_API_KEY` set, the script prints an error and exits 1. Not run in CI.

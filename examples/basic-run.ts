@@ -15,7 +15,9 @@ import {
   writeFileTool,
   bashTool,
   editFileTool,
+  createTaskTool,
   type Message,
+  type ChildSpec,
   type ApprovalHandler,
   type Usage,
 } from "tiny-agentic";
@@ -209,6 +211,75 @@ for await (const event of agent.run(
       break;
     case "agent_done":
       console.log(`\n[completed before abort took effect — usage: ${formatUsage(event.usage)}]`);
+      break;
+  }
+}
+
+// --- Turn 6: Sub-agent delegation (task tool + custom child toolset) ---
+console.log("\n=== Turn 6: Sub-agent delegation (task tool) ===");
+
+// resolveChild is the host-owned seam that builds each sub-agent. The child's
+// toolset is chosen HERE and can differ from the parent's: this child gets
+// read-only file access and deliberately OMITS the `task` tool (the structural
+// recursion bound — a sub-agent cannot spawn its own sub-agent). It also runs
+// on a cheaper, DIFFERENT model than the parent (per-task model selection).
+const CHILD_MODEL = "claude-haiku-4-5";
+function resolveChild(spec: ChildSpec): Agent {
+  return new Agent({
+    provider: new AnthropicProvider({ apiKey: apiKey!, model: spec.model ?? CHILD_MODEL }),
+    tools: [readFileTool],
+    platform: new NodePlatform(),
+    systemPrompt: "You are a focused sub-agent. Do the task and report a short summary.",
+    maxTurns: 5,
+  });
+}
+
+const coordinator = new Agent({
+  provider,
+  tools: [createTaskTool({ resolveChild })],
+  platform: new NodePlatform(),
+  systemPrompt:
+    "You are a coordinator. Delegate well-scoped sub-tasks with the task tool, then report what came back. Keep responses concise.",
+  maxTurns: 8,
+});
+
+for await (const event of coordinator.run(
+  `Use the task tool to delegate this to a sub-agent (model "${CHILD_MODEL}"): ` +
+    `read the file "package.json" and report its "name" and "version" fields, then summarize. ` +
+    `Report back what the sub-agent returned.`,
+)) {
+  switch (event.type) {
+    case "text_delta":
+      process.stdout.write(event.text);
+      break;
+    case "tool_use_start":
+      console.log(`\n[parent calls: ${event.toolName}(${JSON.stringify(event.toolInput).slice(0, 120)})]`);
+      break;
+    case "subagent_event": {
+      // Sanitized child events, tagged by taskId — the child's own text, tool
+      // calls, and terminal usage surface here without flattening into the parent stream.
+      const c = event.event;
+      if (c.type === "text_delta") process.stdout.write(`  [child ${event.taskId}] ${c.text}`);
+      else if (c.type === "tool_use_start") console.log(`  [child ${event.taskId}] tool: ${c.toolName}`);
+      else if (c.type === "tool_result") console.log(`  [child ${event.taskId}] tool_result (${c.toolName}, isError=${c.isError})`);
+      else if (c.type === "terminal") console.log(`  [child ${event.taskId}] terminal: ${c.reason} usage=${formatUsage(c.usage)}`);
+      break;
+    }
+    case "tool_result":
+      console.log(`\n[parent tool_result: isError=${event.isError}, result=${JSON.stringify(event.result).slice(0, 160)}]`);
+      break;
+    case "turn_complete":
+      if (event.usage) console.log(`[turn ${event.turnIndex} complete, usage: ${formatUsage(event.usage)}]`);
+      break;
+    case "agent_done":
+      console.log(`\n[agent done — rolled-up usage (incl. child): ${formatUsage(event.usage)}]`);
+      break;
+    case "agent_error":
+      console.error("\n[agent error]", event.error.message);
+      process.exit(1);
+      break;
+    case "max_turns_exceeded":
+      console.error("\n[max turns exceeded]");
       break;
   }
 }
