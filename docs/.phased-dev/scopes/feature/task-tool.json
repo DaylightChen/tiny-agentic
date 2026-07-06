@@ -1,0 +1,65 @@
+{
+  "schemaVersion": 1,
+  "id": "feature/task-tool",
+  "type": "feature",
+  "name": "task-tool",
+  "pipeline": [
+    {
+      "phase": "research",
+      "agent": "researcher",
+      "outputCheck": "docs/feature/task-tool/research/*.md"
+    },
+    {
+      "phase": "engineering",
+      "agent": "feature-architect",
+      "outputCheck": "docs/feature/task-tool/engineering/*.md"
+    },
+    {
+      "phase": "plan",
+      "agent": "planner",
+      "outputCheck": [
+        "docs/feature/task-tool/plan/implementation-plan.md",
+        "docs/feature/task-tool/tasks/task-*/brief.md"
+      ]
+    },
+    {
+      "phase": "implement",
+      "agent": null,
+      "outputCheck": [
+        "docs/feature/task-tool/tasks/task-*/brief.md",
+        "docs/feature/task-tool/tasks/task-*/completion.md"
+      ]
+    }
+  ],
+  "currentPhase": "implement",
+  "phaseStatus": "complete",
+  "paths": {
+    "researchDir": "docs/feature/task-tool/research/",
+    "engineeringDir": "docs/feature/task-tool/engineering/",
+    "plan": "docs/feature/task-tool/plan/implementation-plan.md",
+    "tasks": "docs/feature/task-tool/tasks/",
+    "decisions": "docs/feature/task-tool/decisions.md"
+  },
+  "history": [
+    {
+      "phase": "research",
+      "completedAt": "2026-07-01T21:51:38+08:00",
+      "approvedAt": "2026-07-01T21:51:38+08:00"
+    },
+    {
+      "phase": "engineering",
+      "completedAt": "2026-07-01T22:20:38+08:00",
+      "approvedAt": "2026-07-01T22:20:38+08:00"
+    },
+    {
+      "phase": "plan",
+      "completedAt": "2026-07-01T22:50:37+08:00",
+      "approvedAt": "2026-07-01T22:50:37+08:00"
+    },
+    {
+      "phase": "implement",
+      "completedAt": "2026-07-02T11:33:30+08:00",
+      "approvedAt": "2026-07-02T11:33:30+08:00"
+    }
+  ]
+}

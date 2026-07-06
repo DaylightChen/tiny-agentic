@@ -1,0 +1,49 @@
+{
+  "schemaVersion": 1,
+  "id": "feature/core-run-controls",
+  "type": "feature",
+  "name": "core-run-controls",
+  "pipeline": [
+    {
+      "phase": "research",
+      "agent": "researcher",
+      "outputCheck": "docs/feature/core-run-controls/research/*.md"
+    },
+    {
+      "phase": "engineering",
+      "agent": "feature-architect",
+      "outputCheck": "docs/feature/core-run-controls/engineering/*.md"
+    },
+    {
+      "phase": "plan",
+      "agent": "planner",
+      "outputCheck": [
+        "docs/feature/core-run-controls/plan/implementation-plan.md",
+        "docs/feature/core-run-controls/tasks/task-*/brief.md"
+      ]
+    },
+    {
+      "phase": "implement",
+      "agent": null,
+      "outputCheck": [
+        "docs/feature/core-run-controls/tasks/task-*/brief.md",
+        "docs/feature/core-run-controls/tasks/task-*/completion.md"
+      ]
+    }
+  ],
+  "currentPhase": "implement",
+  "phaseStatus": "complete",
+  "paths": {
+    "researchDir": "docs/feature/core-run-controls/research/",
+    "engineeringDir": "docs/feature/core-run-controls/engineering/",
+    "plan": "docs/feature/core-run-controls/plan/implementation-plan.md",
+    "tasks": "docs/feature/core-run-controls/tasks/",
+    "decisions": "docs/feature/core-run-controls/decisions.md"
+  },
+  "history": [
+    { "phase": "research", "completedAt": "2026-06-30T00:00:00Z", "approvedAt": "2026-06-30T00:00:00Z", "note": "Research approved after a max-effort adversarial verification. Outputs: research/2026-06-30-core-run-controls-research.md (8 open questions), research/2026-06-30-claude-code-usage-reference.md (reference deep-dive), research/2026-06-30-verification-addendum.md (3 independent verifiers vs real code + SDK .d.ts — 0 claims refuted; proved AbortSignal.any() type-checks under lib:[ES2022] via real tsc; 9 engineering precision notes). User decision locked in decisions.md: token-usage surface = Option A (cumulative usage on terminal events + Terminal, normalized cross-provider shape, merge/accumulate helpers), mirroring Claude Code; Terminal.usage is the sub-agent Task-tool roll-up seam." },
+    { "phase": "engineering", "completedAt": "2026-06-30T00:00:00Z", "approvedAt": "2026-06-30T00:00:00Z", "note": "Engineering spec approved: engineering/2026-06-30-core-run-controls-engineering.md (+ spec-review-addendum, RESOLVED). All 8 open questions resolved; 11 decisions logged. Final review by 2 independent reviewers (adversarial code-sketch review + blast-radius audit) vs real code + SDK types + a real tsc compile (mergeUsage/accumulateUsage/translateChunk exit 0; per-turn accumulator isolation confirmed; all 9 precision notes honored). 4 findings folded into the spec: (1 blocking) compile-breaking typed-literal terminals in collect.test.ts/types.test.ts need usage:EMPTY_USAGE; (2) pin turnUsage to top of while body; (3) message_stop usage conditional on BOTH providers (asymmetry fix); (4) test dir + nits. Design: external AbortSignal via AbortSignal.any + pre-flight guard; normalized Usage in types/usage.ts; usage on terminal events+Terminal (non-optional, EMPTY_USAGE fallback) + turn_complete (optional); message_stop ProviderEvent +usage?; OpenAI include_usage always-on. Additive; regression bar 196." },
+    { "phase": "plan", "completedAt": "2026-06-30T00:00:00Z", "approvedAt": "2026-06-30T00:00:00Z", "note": "Plan approved: plan/implementation-plan.md + 7 task briefs. Order: 01 usage-foundation → 02 type-changes+test-fixes (collapses type change + 5 compile-breaking literal fixes for build-green invariant) → 03 external-abort-signal → 04 loop-accumulation (turnUsage pin documented) → 05 anthropic-usage-capture → 06 openai-usage-capture → 07 examples (run-controls demo for both providers, depends on 01-06). Build-green invariant: no task leaves the branch uncompilable. 4 binding constraints verified in the right briefs; planner self-review found no forward deps." },
+    { "phase": "implement", "completedAt": "2026-06-30T00:00:00Z", "approvedAt": "2026-06-30T00:00:00Z", "note": "Implement phase approved — feature workflow COMPLETE. All 7 tasks shipped with paired brief.md + completion.md: 01 usage-foundation (da5cbb5), 02 type-changes+test-fixes (ae2800d), 03 external-abort-signal (e7b26d4), 04 loop-accumulation (376c548), 05 anthropic-usage-capture (b7fda53), 06 openai-usage-capture (37bc833), 07 examples (8f9d06b). Final state: build + 253/253 tests + typecheck + lint clean. External AbortSignal on Agent.run() + token usage end-to-end across Anthropic + OpenAI. Terminal.usage is the sub-agent Task-tool roll-up seam for the next Tier-1 feature." }
+  ]
+}

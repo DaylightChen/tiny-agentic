@@ -1,0 +1,49 @@
+{
+  "schemaVersion": 1,
+  "id": "feature/openai-provider",
+  "type": "feature",
+  "name": "openai-provider",
+  "pipeline": [
+    {
+      "phase": "research",
+      "agent": "researcher",
+      "outputCheck": "docs/feature/openai-provider/research/*.md"
+    },
+    {
+      "phase": "engineering",
+      "agent": "feature-architect",
+      "outputCheck": "docs/feature/openai-provider/engineering/*.md"
+    },
+    {
+      "phase": "plan",
+      "agent": "planner",
+      "outputCheck": [
+        "docs/feature/openai-provider/plan/implementation-plan.md",
+        "docs/feature/openai-provider/tasks/task-*/brief.md"
+      ]
+    },
+    {
+      "phase": "implement",
+      "agent": null,
+      "outputCheck": [
+        "docs/feature/openai-provider/tasks/task-*/brief.md",
+        "docs/feature/openai-provider/tasks/task-*/completion.md"
+      ]
+    }
+  ],
+  "currentPhase": "implement",
+  "phaseStatus": "complete",
+  "paths": {
+    "researchDir": "docs/feature/openai-provider/research/",
+    "engineeringDir": "docs/feature/openai-provider/engineering/",
+    "plan": "docs/feature/openai-provider/plan/implementation-plan.md",
+    "tasks": "docs/feature/openai-provider/tasks/",
+    "decisions": "docs/feature/openai-provider/decisions.md"
+  },
+  "history": [
+    { "phase": "research", "completedAt": "2026-06-29T00:00:00Z", "approvedAt": "2026-06-29T00:00:00Z", "note": "OpenAI provider research approved. Output: research/2026-06-29-openai-provider-research.md. Four forks locked in decisions.md: Chat Completions API (not Responses), tool-result errors ride in content string (drop is_error), default maxRetries=3 (match Anthropic), expose baseURL (Azure AzureOpenAI out of scope)." },
+    { "phase": "engineering", "completedAt": "2026-06-29T00:00:00Z", "approvedAt": "2026-06-29T00:00:00Z", "note": "Engineering spec approved: engineering/2026-06-29-openai-provider-engineering.md. Modules: new providers/openai.ts + openai-mapper.ts + tests; edits to package.json (optional openai peer dep + ./providers/openai sub-path) and tsup.config.ts; index.ts unchanged. Raw-chunk streaming, flush-at-stream-end accumulator keyed on tool_calls[].index, four request transforms, max_completion_tokens. Two more decisions locked: system role for all models; maxTokens default 32000. Residual #3 (openai peer-dep version range) deferred to implement time." },
+    { "phase": "plan", "completedAt": "2026-06-29T00:00:00Z", "approvedAt": "2026-06-29T00:00:00Z", "note": "Plan approved: plan/implementation-plan.md + 2 task briefs. task-01-openai-mapper (mapper in isolation, fixture tests) → task-02-openai-provider-and-packaging (provider class + package.json peer-dep/export + tsup entry, mock-SDK tests). Planner flagged openai is 6.x not 4.x (pin ^6.0.0 at implement) and that chat.completions.create is Promise-returning (must await before iterating)." },
+    { "phase": "implement", "completedAt": "2026-06-29T00:00:00Z", "approvedAt": "2026-06-29T00:00:00Z", "note": "FEATURE COMPLETE. Both tasks done via the dev loop (impl→test→review), 1 iteration each: task-01 openai-mapper (9d0ba4f), task-02 OpenAIProvider + packaging + example (aeb387a), docs marker (6a2738e). Manual verification surfaced a core M1 bug — tool schemas emitted boolean exclusiveMinimum (openApi3); fixed in core (4f4e75b, jsonSchema7 + strip $schema), superseding the M1 decision. Live-verified against OpenAI + Anthropic; full suite 140/140, typecheck/build clean. Security: a hardcoded Azure key committed in B was purged from history (B amended 64f1937→aeb387a, gc'd) and the key rotated by the user. implement is the terminal phase — feature workflow complete." }
+  ]
+}

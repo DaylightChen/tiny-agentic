@@ -1,0 +1,56 @@
+{
+  "schemaVersion": 1,
+  "id": "project",
+  "type": "project",
+  "name": null,
+  "pipeline": [
+    {
+      "phase": "research",
+      "agent": "researcher",
+      "outputCheck": "docs/project/research/*.md"
+    },
+    {
+      "phase": "brainstorm",
+      "agent": "brainstormer",
+      "outputCheck": "docs/project/brainstorm/*.md"
+    },
+    {
+      "phase": "engineering",
+      "agent": "architect",
+      "outputCheck": "docs/project/engineering/*.md"
+    },
+    {
+      "phase": "plan",
+      "agent": "planner",
+      "outputCheck": [
+        "docs/project/plan/implementation-plan.md",
+        "docs/project/tasks/task-*/brief.md"
+      ]
+    },
+    {
+      "phase": "implement",
+      "agent": null,
+      "outputCheck": [
+        "docs/project/tasks/task-*/brief.md",
+        "docs/project/tasks/task-*/completion.md"
+      ]
+    }
+  ],
+  "currentPhase": "implement",
+  "phaseStatus": "complete",
+  "paths": {
+    "researchDir": "docs/project/research/",
+    "brainstormDir": "docs/project/brainstorm/",
+    "engineeringDir": "docs/project/engineering/",
+    "plan": "docs/project/plan/implementation-plan.md",
+    "tasks": "docs/project/tasks/",
+    "decisions": "docs/project/decisions.md"
+  },
+  "history": [
+    { "phase": "research", "completedAt": "2026-06-27T00:00:00Z", "approvedAt": "2026-06-27T00:00:00Z", "note": "Backfilled on 0.4.0→0.5.0 migration; satisfied by pre-existing docs/research/ subsystem map" },
+    { "phase": "brainstorm", "completedAt": "2026-06-27T14:41:58Z", "approvedAt": "2026-06-27T14:41:58Z", "note": "Opus refine pass (rewound from implement; git preserved via tag sonnet-run-checkpoint). Reconciled brainstorm with locked decisions, closed gaps, success criteria 14→18. Approved after orchestrator self-review; 3 flags handed to the engineering refine (malformed-JSON parse error, logger LogEntry scope, maxTokens default + criteria 15-18 coverage)." },
+    { "phase": "engineering", "completedAt": "2026-06-27T15:06:38Z", "approvedAt": "2026-06-27T15:06:38Z", "note": "Opus refine pass (commit 27f095c). Resolved @types/node/skipLibCheck escalation (skipLibCheck:true, @types/node ^22, Node floor→22), malformed-JSON via inputParseError flag (replacing buggy PARSE_ERROR symbol), maxTokens default 32000, criteria 7.15-7.18, stop_reason caching. Two orchestrator self-reviews; 3 bugs (A/B/C) fixed before approval." },
+    { "phase": "plan", "completedAt": "2026-06-28T07:15:15Z", "approvedAt": "2026-06-28T07:15:15Z", "note": "Opus refine pass (commit 80de5e0). Planner did task-01 (Node 22/skipLibCheck) before a transient classifier 403; orchestrator completed tasks 02/04/05/06/07/08/10 + plan (inputParseError flag, criteria 7.15-7.18, maxTokens, 6.1 split) and self-reviewed. Stale Sonnet-run task-01 completion.md + logs removed for a clean Opus redo." },
+    { "phase": "implement", "completedAt": "2026-06-29T02:14:21Z", "approvedAt": "2026-06-29T02:14:21Z", "note": "M1 DONE. All 10 tasks redone with Opus dev-loop agents (implement→test→review), each with brief.md + completion.md. Final state: 91 unit tests green, typecheck/lint/build clean under Node 22. User-requested scope add: read_file/write_file line ranges (offset/limit). READMEs added for project + all packages + examples. Last task commit 9f019fb. Implement is the terminal phase — project-scope workflow complete." }
+  ]
+}

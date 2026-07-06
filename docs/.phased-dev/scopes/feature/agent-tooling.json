@@ -1,0 +1,49 @@
+{
+  "schemaVersion": 1,
+  "id": "feature/agent-tooling",
+  "type": "feature",
+  "name": "agent-tooling",
+  "pipeline": [
+    {
+      "phase": "research",
+      "agent": "researcher",
+      "outputCheck": "docs/feature/agent-tooling/research/*.md"
+    },
+    {
+      "phase": "engineering",
+      "agent": "feature-architect",
+      "outputCheck": "docs/feature/agent-tooling/engineering/*.md"
+    },
+    {
+      "phase": "plan",
+      "agent": "planner",
+      "outputCheck": [
+        "docs/feature/agent-tooling/plan/implementation-plan.md",
+        "docs/feature/agent-tooling/tasks/task-*/brief.md"
+      ]
+    },
+    {
+      "phase": "implement",
+      "agent": null,
+      "outputCheck": [
+        "docs/feature/agent-tooling/tasks/task-*/brief.md",
+        "docs/feature/agent-tooling/tasks/task-*/completion.md"
+      ]
+    }
+  ],
+  "currentPhase": "implement",
+  "phaseStatus": "complete",
+  "paths": {
+    "researchDir": "docs/feature/agent-tooling/research/",
+    "engineeringDir": "docs/feature/agent-tooling/engineering/",
+    "plan": "docs/feature/agent-tooling/plan/implementation-plan.md",
+    "tasks": "docs/feature/agent-tooling/tasks/",
+    "decisions": "docs/feature/agent-tooling/decisions.md"
+  },
+  "history": [
+    { "phase": "research", "completedAt": "2026-06-29T15:00:00Z", "approvedAt": "2026-06-29T15:00:00Z", "note": "Research findings approved: research/2026-06-29-agent-tooling-research.md. Covered bash (shell-vs-execFile gap, additive fixes), edit_file (old/new/replace_all unique-match, read-before-edit needs ToolCallContext state — defer), permission seam (3 headless patterns, gate before tool.call in runTools), cancellation (mechanical: signal on ToolCallContext + ExecOptions). 8 open questions handed to engineering; user delegated the permission-surface choice (Q3) to the architect." },
+    { "phase": "engineering", "completedAt": "2026-06-29T15:35:00Z", "approvedAt": "2026-06-29T15:35:00Z", "note": "Engineering spec approved: engineering/2026-06-29-agent-tooling-engineering.md. All 8 OQs resolved (8 decisions logged): shell?:boolean on ExecOptions; read-before-edit deferred to SDK (known-issues logged); permission seam = injected approvalHandler callback on AgentOptions (Option A); gate in runTools after Zod before tool.call; bash default blanket-allow (opt-in gate); SIGTERM-only abort; context.signal set once per run; exports bashTool/editFileTool/ApprovalDecision/ApprovalHandler from index.ts (types in types/tool.ts to avoid circular import). All changes additive; existing 140 tests unaffected." },
+    { "phase": "plan", "completedAt": "2026-06-29T16:25:00Z", "approvedAt": "2026-06-29T16:25:00Z", "note": "Plan approved: plan/implementation-plan.md + 5 task briefs. Order: 01 type+platform foundations (ToolCallContext.signal, ExecOptions.shell?/signal?, NodePlatform.exec shell-vs-split + signal refactor) → 02 bash tool → 03 edit_file tool → 04 permission gate (types in types/tool.ts + gate in runTools; agentLoop wiring deferred to 05) → 05 wiring+exports+integration (capstone). Planner self-review: no forward deps, all 7 §13 deferrals confirmed absent, circular-import guard noted, 20 success criteria mapped." },
+    { "phase": "implement", "completedAt": "2026-06-30T00:00:00Z", "approvedAt": "2026-06-30T00:00:00Z", "note": "FEATURE COMPLETE (terminal phase). All 5 tasks done via the dev loop (implement→test→review), each with brief.md + completion.md: 01 type+platform foundations 1b58b86 (2 iters — review caught AbortError exitCode-as-string bug), 02 bash tool 90225a0, 03 edit_file tool 894839a, 04 permission gate e12fdf4, 05 wiring+exports+integration 70bd7b3. Final: 196/196 tests, build+typecheck+lint clean. Core now ships bashTool, editFileTool, approvalHandler permission seam, and end-to-end AbortSignal cancellation; all additive (no breaking changes). Examples gained a Turn-4 tooling demo (e102979). Deferred items logged in known-issues + engineering §13. Follow-up roadmap: docs/project/core-roadmap.md." }
+  ]
+}

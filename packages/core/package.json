@@ -1,0 +1,84 @@
+{
+  "name": "tiny-agentic",
+  "version": "0.1.0",
+  "description": "Headless agentic engine: agent loop, tools, provider abstraction, typed event stream.",
+  "type": "module",
+  "license": "MIT",
+  "author": "Daylight Chen",
+  "keywords": [
+    "agent",
+    "agentic",
+    "llm",
+    "anthropic",
+    "openai",
+    "tools",
+    "headless"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/DaylightChen/tiny-agentic.git",
+    "directory": "packages/core"
+  },
+  "homepage": "https://github.com/DaylightChen/tiny-agentic#readme",
+  "bugs": {
+    "url": "https://github.com/DaylightChen/tiny-agentic/issues"
+  },
+  "files": [
+    "dist"
+  ],
+  "engines": {
+    "node": ">=22.0.0"
+  },
+  "exports": {
+    ".": {
+      "import": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+    },
+    "./providers/anthropic": {
+      "import": "./dist/providers/anthropic.js",
+      "types": "./dist/providers/anthropic.d.ts"
+    },
+    "./providers/openai": {
+      "import": "./dist/providers/openai.js",
+      "types": "./dist/providers/openai.d.ts"
+    },
+    "./platform/node": {
+      "import": "./dist/platform/node.js",
+      "types": "./dist/platform/node.d.ts"
+    },
+    "./utils": {
+      "import": "./dist/utils/collect.js",
+      "types": "./dist/utils/collect.d.ts"
+    }
+  },
+  "scripts": {
+    "build": "tsup",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "test:watch": "vitest"
+  },
+  "dependencies": {
+    "zod-to-json-schema": "^3.23.0"
+  },
+  "peerDependencies": {
+    "@anthropic-ai/sdk": "^0.52.0",
+    "openai": "^6.0.0",
+    "zod": "^3.22.0"
+  },
+  "peerDependenciesMeta": {
+    "@anthropic-ai/sdk": {
+      "optional": true
+    },
+    "openai": {
+      "optional": true
+    }
+  },
+  "devDependencies": {
+    "@anthropic-ai/sdk": "^0.52.0",
+    "@types/node": "^22.0.0",
+    "openai": "^6.0.0",
+    "tsup": "^8.0.0",
+    "typescript": "^5.7.0",
+    "vitest": "^3.0.0"
+  }
+}
