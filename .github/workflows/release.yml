@@ -12,6 +12,11 @@ permissions:
 jobs:
   publish:
     runs-on: ubuntu-latest
+    # Only the repo owner may release. Defense-in-depth alongside tag
+    # protection (blocks the tag) and the `release` environment (requires
+    # a manual approval before this job runs).
+    if: github.actor == 'DaylightChen'
+    environment: release
     steps:
       - uses: actions/checkout@v4
 
@@ -37,8 +42,6 @@ jobs:
 
       - name: Publish tiny-agentic
         run: pnpm --filter tiny-agentic publish --no-git-checks --provenance --access public
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
 
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
