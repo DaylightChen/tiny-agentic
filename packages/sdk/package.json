@@ -1,7 +1,7 @@
 {
   "name": "tiny-agentic-sdk",
   "version": "0.0.0",
-  "private": false,
+  "private": true,
   "type": "module",
   "scripts": { "typecheck": "tsc --noEmit" },
   "dependencies": { "tiny-agentic": "workspace:*" },

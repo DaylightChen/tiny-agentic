@@ -4,6 +4,28 @@
   "description": "Headless agentic engine: agent loop, tools, provider abstraction, typed event stream.",
   "type": "module",
   "license": "MIT",
+  "author": "Daylight Chen",
+  "keywords": [
+    "agent",
+    "agentic",
+    "llm",
+    "anthropic",
+    "openai",
+    "tools",
+    "headless"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/DaylightChen/tiny-agentic.git",
+    "directory": "packages/core"
+  },
+  "homepage": "https://github.com/DaylightChen/tiny-agentic#readme",
+  "bugs": {
+    "url": "https://github.com/DaylightChen/tiny-agentic/issues"
+  },
+  "files": [
+    "dist"
+  ],
   "engines": {
     "node": ">=22.0.0"
   },
