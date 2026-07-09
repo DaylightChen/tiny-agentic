@@ -27,9 +27,10 @@ export type ProviderRequest = {
 
 /** Canonical streaming events yielded by a provider. Provider-agnostic. */
 export type ProviderEvent =
-  | { type: "text_delta";   text: string }
-  | { type: "tool_use";     id: string; name: string; input: unknown; inputParseError?: boolean }
-  | { type: "message_stop"; stopReason: "end_turn" | "tool_use" | "max_tokens" | string; usage?: Usage };
+  | { type: "text_delta";      text: string }
+  | { type: "reasoning_delta"; text: string }
+  | { type: "tool_use";        id: string; name: string; input: unknown; inputParseError?: boolean }
+  | { type: "message_stop";    stopReason: "end_turn" | "tool_use" | "max_tokens" | string; usage?: Usage };
 
 // Malformed streamed tool input (§6.1) is signalled by the optional
 // `inputParseError: true` boolean on a tool_use event, NOT by a sentinel value

@@ -11,7 +11,8 @@ import type { Usage } from "./usage.js";
  * tool output reads the child Terminal inside its own resolveChild wiring.
  */
 export type SubagentChildEvent =
-  | { type: "text_delta";     text: string }
+  | { type: "text_delta";      text: string }
+  | { type: "reasoning_delta"; text: string }
   | { type: "tool_use_start"; toolName: string; toolInput: unknown }
   | { type: "tool_result";    toolName: string; toolCallId: string; isError: boolean }
   | { type: "terminal";       reason: "agent_done" | "max_turns_exceeded" | "agent_error"; usage: Usage; errorMessage?: string };
@@ -31,6 +32,7 @@ export type SubagentChildEvent =
  */
 export type AgentEvent =
   | { type: "text_delta";         text: string }
+  | { type: "reasoning_delta";    text: string }
   | { type: "tool_use_start";     toolName: string; toolInput: unknown }
   | { type: "tool_result";        toolName: string; toolCallId: string; result: unknown; isError: boolean }
   | { type: "turn_complete";      turnIndex: number; usage?: Usage }

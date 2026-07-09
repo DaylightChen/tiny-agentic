@@ -338,6 +338,41 @@ describe("translateChunk — text streaming", () => {
   });
 });
 
+describe("translateChunk — reasoning streaming (OpenAI-compat extensions)", () => {
+  it("maps DeepSeek's reasoning_content delta to a reasoning_delta", () => {
+    const chunks = [
+      { choices: [{ index: 0, delta: { reasoning_content: "step 1 " }, finish_reason: null }] },
+      { choices: [{ index: 0, delta: { reasoning_content: "step 2" }, finish_reason: null }] },
+      { choices: [{ index: 0, delta: { content: "done" }, finish_reason: "stop" }] },
+    ];
+
+    // Reasoning arrives before content and surfaces as reasoning_delta, in order.
+    expect(run(chunks)).toEqual([
+      { type: "reasoning_delta", text: "step 1 " },
+      { type: "reasoning_delta", text: "step 2" },
+      { type: "text_delta", text: "done" },
+      { type: "message_stop", stopReason: "end_turn" },
+    ]);
+  });
+
+  it("maps OpenRouter's normalized `reasoning` delta to a reasoning_delta", () => {
+    const out = run([{ choices: [{ index: 0, delta: { reasoning: "thinking" }, finish_reason: "stop" }] }]);
+    expect(out).toEqual([
+      { type: "reasoning_delta", text: "thinking" },
+      { type: "message_stop", stopReason: "end_turn" },
+    ]);
+  });
+
+  it("emits no reasoning_delta for vanilla OpenAI deltas (neither field present)", () => {
+    const out = run([{ choices: [{ index: 0, delta: { content: "hi" }, finish_reason: "stop" }] }]);
+    expect(out.some((e) => e.type === "reasoning_delta")).toBe(false);
+    expect(out).toEqual([
+      { type: "text_delta", text: "hi" },
+      { type: "message_stop", stopReason: "end_turn" },
+    ]);
+  });
+});
+
 describe("translateChunk — single tool call", () => {
   it("yields no events during the stream; flush yields the parsed tool_use then one message_stop", () => {
     const chunks = [

@@ -105,6 +105,36 @@ describe("translateStreamEvent — text streaming", () => {
   });
 });
 
+describe("translateStreamEvent — thinking (reasoning) streaming", () => {
+  it("maps a thinking_delta to a single reasoning_delta carrying the .thinking text", () => {
+    const events = [
+      { type: "content_block_start", index: 0, content_block: { type: "thinking" } },
+      { type: "content_block_delta", index: 0, delta: { type: "thinking_delta", thinking: "Let me " } },
+      { type: "content_block_delta", index: 0, delta: { type: "thinking_delta", thinking: "reason…" } },
+      { type: "content_block_stop", index: 0 },
+    ];
+
+    const out = run(events);
+
+    expect(out).toEqual([
+      { type: "reasoning_delta", text: "Let me " },
+      { type: "reasoning_delta", text: "reason…" },
+    ]);
+  });
+
+  it("preserves order when thinking precedes text (reasoning_delta before text_delta)", () => {
+    const events = [
+      { type: "content_block_delta", index: 0, delta: { type: "thinking_delta", thinking: "think" } },
+      { type: "content_block_delta", index: 1, delta: { type: "text_delta", text: "answer" } },
+    ];
+
+    expect(run(events)).toEqual([
+      { type: "reasoning_delta", text: "think" },
+      { type: "text_delta", text: "answer" },
+    ]);
+  });
+});
+
 describe("translateStreamEvent — single tool use", () => {
   it("accumulates input_json_delta chunks and emits a tool_use at content_block_stop", () => {
     const events = [
