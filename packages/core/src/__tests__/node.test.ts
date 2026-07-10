@@ -206,17 +206,3 @@ describe("NodePlatform.stat", () => {
     );
   });
 });
-
-describe("NodePlatform.glob / grep — task-01 throwing stubs", () => {
-  it("glob rejects with the 'landed in task-02' message", async () => {
-    await expect(platform.glob("*")).rejects.toThrow(
-      "NodePlatform.glob not implemented — landed in task-02",
-    );
-  });
-
-  it("grep rejects with the 'landed in task-02' message", async () => {
-    await expect(platform.grep("x", "")).rejects.toThrow(
-      "NodePlatform.grep not implemented — landed in task-02",
-    );
-  });
-});

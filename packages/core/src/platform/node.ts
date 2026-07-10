@@ -13,6 +13,7 @@ import type {
   GrepOptions,
   GrepPlatformResult,
 } from "../types/platform.js";
+import { globImpl, grepImpl } from "./fs-discovery.js";
 
 const execFileAsync = promisify(execFile);
 
@@ -122,11 +123,11 @@ export class NodePlatform implements Platform {
     };
   }
 
-  async glob(_pattern: string, _options?: GlobOptions): Promise<GlobResult> {
-    throw new Error("NodePlatform.glob not implemented — landed in task-02");
+  async glob(pattern: string, options?: GlobOptions): Promise<GlobResult> {
+    return globImpl(this.cwd(), pattern, options ?? {});
   }
 
-  async grep(_pattern: string, _flags: string, _options?: GrepOptions): Promise<GrepPlatformResult> {
-    throw new Error("NodePlatform.grep not implemented — landed in task-02");
+  async grep(pattern: string, flags: string, options?: GrepOptions): Promise<GrepPlatformResult> {
+    return grepImpl(this.cwd(), pattern, flags, options ?? {});
   }
 }
