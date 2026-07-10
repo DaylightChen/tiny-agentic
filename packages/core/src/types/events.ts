@@ -22,7 +22,7 @@ export type SubagentChildEvent =
  * Discriminated by `type`. Handle with a switch statement.
  *
  * Primary events (almost always handled):
- *   text_delta, agent_done, agent_error
+ *   text_delta, reasoning_delta, agent_done, agent_error
  *
  * Secondary events (logging, progress display):
  *   tool_use_start, tool_result
