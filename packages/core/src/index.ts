@@ -20,6 +20,7 @@ export { bashTool } from "./tools/builtin/bash.js";
 export { editFileTool } from "./tools/builtin/editFile.js";
 export { lsTool } from "./tools/builtin/ls.js";
 export { globTool } from "./tools/builtin/glob.js";
+export { grepTool } from "./tools/builtin/grep.js";
 export { createTaskTool } from "./tools/builtin/task.js";
 export type { CreateTaskToolOptions, ChildSpec } from "./tools/builtin/task.js";
 export type { SubagentChildEvent } from "./types/events.js";
