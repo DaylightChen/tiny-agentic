@@ -155,6 +155,13 @@ export function translateStreamEvent(
       if (delta.type === "text_delta") {
         return [{ type: "text_delta", text: asString(delta.text) }];
       }
+      // Extended-thinking blocks stream their chain-of-thought as thinking_delta
+      // (the `.thinking` field). Surface it as an observation-only reasoning_delta;
+      // the loop forwards it to the caller but never threads it back into history
+      // (Anthropic returns thinking as summary metadata, not prior-turn text).
+      if (delta.type === "thinking_delta") {
+        return [{ type: "reasoning_delta", text: asString(delta.thinking) }];
+      }
       if (delta.type === "input_json_delta") {
         accumulator.appendJson(asNumber(event.index), asString(delta.partial_json));
       }

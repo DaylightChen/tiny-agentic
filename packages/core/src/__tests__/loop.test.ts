@@ -105,6 +105,39 @@ describe("agentLoop", () => {
     expect(terminal.reason).toBe("agent_done");
   });
 
+  it("forwards reasoning_delta to the caller but keeps it out of assistant history", async () => {
+    const provider = new MockProvider([
+      [
+        { type: "reasoning_delta", text: "let me think" },
+        { type: "text_delta", text: "answer" },
+        { type: "message_stop", stopReason: "end_turn" },
+      ],
+    ]);
+    const params = makeParams(provider, new ToolRegistry([]));
+
+    const { events, terminal } = await collectEvents(agentLoop(params));
+
+    // Forwarded to the stream, in order, before the text it precedes.
+    expect(events.map((e) => e.type)).toEqual([
+      "reasoning_delta",
+      "text_delta",
+      "turn_complete",
+      "agent_done",
+    ]);
+    expect(events.find((e) => e.type === "reasoning_delta")).toEqual({
+      type: "reasoning_delta",
+      text: "let me think",
+    });
+
+    // Hard contract: reasoning never threads back into `messages`. The assistant
+    // turn holds only the text — not the chain-of-thought — so a caller that
+    // re-runs with the returned history sends no reasoning back to the model.
+    const assistant = terminal.messages.find((m) => m.role === "assistant");
+    expect(assistant?.content).toEqual([{ type: "text", text: "answer" }]);
+    const serialized = JSON.stringify(terminal.messages);
+    expect(serialized).not.toContain("let me think");
+  });
+
   it("runs a tool then completes on the next turn (7.2)", async () => {
     const provider = new MockProvider([
       [

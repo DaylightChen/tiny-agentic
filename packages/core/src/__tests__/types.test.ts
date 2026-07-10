@@ -191,8 +191,8 @@ describe("sub-agent type surface (compile-time boundary assertions)", () => {
     void _leakTranscript;
   });
 
-  it("T20c — SubagentChildEvent is exactly four arms (discriminant is closed)", () => {
-    // An exhaustive switch over the union's `type` with no `default`: if a fifth
+  it("T20c — SubagentChildEvent is exactly five arms (discriminant is closed)", () => {
+    // An exhaustive switch over the union's `type` with no `default`: if a sixth
     // arm is ever added (or an arm removed), `_exhaustive` stops being `never`
     // and the `assertNever` call fails to compile — pinning the arm SET, not just
     // individual shapes. task-03's `sanitizeChildEvent` produces exactly these.
@@ -202,6 +202,8 @@ describe("sub-agent type surface (compile-time boundary assertions)", () => {
     function exhaustiveChildEvent(ev: SubagentChildEvent): string {
       switch (ev.type) {
         case "text_delta":
+          return ev.text;
+        case "reasoning_delta":
           return ev.text;
         case "tool_use_start":
           return ev.toolName;
@@ -216,6 +218,7 @@ describe("sub-agent type surface (compile-time boundary assertions)", () => {
       }
     }
     expect(exhaustiveChildEvent({ type: "text_delta", text: "hi" })).toBe("hi");
+    expect(exhaustiveChildEvent({ type: "reasoning_delta", text: "hmm" })).toBe("hmm");
     expect(
       exhaustiveChildEvent({ type: "terminal", reason: "agent_error", usage: EMPTY_USAGE, errorMessage: "boom" }),
     ).toBe("agent_error");

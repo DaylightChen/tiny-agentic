@@ -53,6 +53,15 @@ export async function* agentLoop(params: LoopParams): AsyncGenerator<AgentEvent,
         if (event.type === "text_delta") {
           textChunks.push(event.text);
           yield { type: "text_delta", text: event.text };
+        } else if (event.type === "reasoning_delta") {
+          // Reasoning is observation-only: forward it to the caller so UI can
+          // stream a chain-of-thought affordance, but do NOT push into
+          // textChunks / assistantContent. Reasoning must not thread back into
+          // `messages` on the next model call (DeepSeek explicitly forbids it,
+          // and Anthropic/OpenAI reasoning models return reasoning as summary
+          // metadata, not as prior-turn assistant text). Keeping it off the
+          // history is a hard contract of this event.
+          yield { type: "reasoning_delta", text: event.text };
         } else if (event.type === "tool_use") {
           pendingToolUses.push({
             id: event.id,

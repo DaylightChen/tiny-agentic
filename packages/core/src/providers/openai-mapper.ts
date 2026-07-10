@@ -170,14 +170,27 @@ export class ToolCallAccumulator {
   private chunkUsage: Usage | undefined;
 
   /**
-   * Apply one chunk's `choices[0].delta`: emit any text fragment as text_delta[],
-   * capture id/name on first sight of each tool_calls[].index, and append
-   * function.arguments fragments onto that index's buffer.
+   * Apply one chunk's `choices[0].delta`: emit any reasoning fragment as
+   * reasoning_delta[] (before text, matching stream order), emit any text
+   * fragment as text_delta[], capture id/name on first sight of each
+   * tool_calls[].index, and append function.arguments fragments onto that
+   * index's buffer.
    */
-  applyDelta(delta: unknown): { type: "text_delta"; text: string }[] {
+  applyDelta(delta: unknown): { type: "text_delta" | "reasoning_delta"; text: string }[] {
     if (!isRecord(delta)) return [];
 
-    const events: { type: "text_delta"; text: string }[] = [];
+    const events: { type: "text_delta" | "reasoning_delta"; text: string }[] = [];
+
+    // Reasoning-token streaming is not part of vanilla OpenAI Chat Completions,
+    // but OpenAI-compatible endpoints expose it on the delta: DeepSeek as
+    // `reasoning_content`, OpenRouter (and passthroughs) as `reasoning`. Both
+    // arrive before the answer's `content`. Surface either as observation-only
+    // reasoning_delta; the loop never threads it back into history. Absent on
+    // vanilla OpenAI, so this is a no-op there.
+    const reasoning = asString(delta.reasoning_content) || asString(delta.reasoning);
+    if (reasoning.length > 0) {
+      events.push({ type: "reasoning_delta", text: reasoning });
+    }
 
     if (typeof delta.content === "string" && delta.content.length > 0) {
       events.push({ type: "text_delta", text: delta.content });

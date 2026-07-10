@@ -115,6 +115,8 @@ export function sanitizeChildEvent(event: AgentEvent): SubagentChildEvent | unde
   switch (event.type) {
     case "text_delta":
       return { type: "text_delta", text: event.text };
+    case "reasoning_delta":
+      return { type: "reasoning_delta", text: event.text };
     case "tool_use_start":
       return { type: "tool_use_start", toolName: event.toolName, toolInput: event.toolInput };
     case "tool_result":
