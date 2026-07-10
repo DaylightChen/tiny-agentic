@@ -12,7 +12,7 @@ export type { Message, ContentBlock, TextBlock, ToolUseBlock, ToolResultBlock } 
 export type { Tool, ToolCallContext } from "./types/tool.js";
 export { defineTool } from "./types/tool.js";
 export type { Provider, ProviderRequest, ProviderEvent, ToolSchema, Logger, LogEntry } from "./types/provider.js";
-export type { Platform, ExecOptions, ExecResult } from "./types/platform.js";
+export type { Platform, ExecOptions, ExecResult, DirEntry, GlobOptions, GlobResult, GrepMatch, GrepOptions, GrepPlatformResult } from "./types/platform.js";
 
 export { readFileTool } from "./tools/builtin/readFile.js";
 export { writeFileTool } from "./tools/builtin/writeFile.js";

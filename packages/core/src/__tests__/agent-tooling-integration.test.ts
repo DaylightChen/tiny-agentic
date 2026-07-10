@@ -80,6 +80,10 @@ function makeMockPlatform() {
       }
       return { stdout: "done", stderr: "", exitCode: 0 };
     },
+    listDir: () => Promise.reject(new Error("listDir not used")),
+    stat: () => Promise.reject(new Error("stat not used")),
+    glob: () => Promise.reject(new Error("glob not used")),
+    grep: () => Promise.reject(new Error("grep not used")),
   };
 
   return {

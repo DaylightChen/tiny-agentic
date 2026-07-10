@@ -61,6 +61,18 @@ class MockPlatform implements Platform {
   exec(): Promise<ExecResult> {
     return Promise.reject(new Error("not used"));
   }
+  listDir() {
+    return Promise.reject(new Error("not used"));
+  }
+  stat() {
+    return Promise.reject(new Error("not used"));
+  }
+  glob() {
+    return Promise.reject(new Error("not used"));
+  }
+  grep() {
+    return Promise.reject(new Error("not used"));
+  }
 }
 
 // A trivial child tool that returns a provider-shaped structured object carrying

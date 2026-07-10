@@ -36,6 +36,18 @@ class MockPlatform implements Platform {
     if (this.overrides.exec) return this.overrides.exec(command, options);
     return Promise.reject(new Error("exec not configured"));
   }
+  listDir() {
+    return Promise.reject(new Error("listDir not configured"));
+  }
+  stat() {
+    return Promise.reject(new Error("stat not configured"));
+  }
+  glob() {
+    return Promise.reject(new Error("glob not configured"));
+  }
+  grep() {
+    return Promise.reject(new Error("grep not configured"));
+  }
 }
 
 function makeRegistry(tools: Tool[]): ToolRegistry {
