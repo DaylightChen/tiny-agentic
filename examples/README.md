@@ -62,6 +62,30 @@ ANTHROPIC_API_KEY=sk-ant-… pnpm tsx examples/task-run.ts
 
 Without `ANTHROPIC_API_KEY` set, the script prints an error and exits 1. Not run in CI.
 
+## `fs-discovery-run.ts`
+
+A filesystem-discovery smoke: an `Agent` built with only the three discovery tools (`ls`, `glob`, `grep`) — **no `bashTool`** — and an `approvalHandler` that would deny `bash` outright, performs a discovery loop over `packages/core/src`. It demonstrates the feature headline: structured discovery stays fully usable when the shell is denied.
+
+A direct `grepTool.call` over `packages/core/src` is timed first (`console.time`/`console.timeEnd`) to surface the sub-second target from the engineering spec's §10 — this part needs no API key, so even a keyless run prints the grep timing before hitting the key guard.
+
+### Run it
+
+Requires a real Anthropic API key (the agent loop makes paid network calls) and Node >= 22.
+
+```bash
+# from the repo root
+pnpm install
+pnpm --filter tiny-agentic build      # the example imports the built dist via the exports map
+ANTHROPIC_API_KEY=sk-ant-… pnpm example:fs-discovery
+```
+
+`pnpm example:fs-discovery` runs `tsx examples/fs-discovery-run.ts`. Without `ANTHROPIC_API_KEY` set, the script still runs the keyless direct-grep timing, then prints an error at the agent-loop guard and exits 1. Not run in CI.
+
+### What it shows
+
+- **Direct grep timing** — a `grepTool.call` over `packages/core/src` completes sub-second (keyless).
+- **Discovery loop** — the model uses `ls`/`glob`/`grep` (never `bash`) to locate and group files, with `bash` explicitly denied by the `approvalHandler`.
+
 ## `subagent-registry.ts`
 
 A `subagent_type` → tool-set registry. The reference (Claude Code) lets the model pick a **named agent type** but never a tool array — the type's tools are fixed by agent-definition frontmatter (`tools:` / `disallowedTools:`) and resolved by `resolveAgentTools`. This example builds the same shape **imperatively in host code**:
