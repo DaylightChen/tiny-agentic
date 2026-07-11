@@ -1,5 +1,5 @@
 import { readFile, writeFile, readdir, lstat } from "node:fs/promises";
-import { join } from "node:path";
+import { basename, join, resolve } from "node:path";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import type { Dirent, Stats } from "node:fs";
@@ -115,8 +115,9 @@ export class NodePlatform implements Platform {
       throw err;
     }
     const type = direntType(stats);
+    const resolved = resolve(path);
     return {
-      name: path,
+      name: basename(resolved) || resolved,
       type,
       size: type === "directory" ? 0 : stats.size,
       mtimeMs: stats.mtimeMs,

@@ -77,6 +77,6 @@ export interface Platform {
   glob(pattern: string, options?: GlobOptions): Promise<GlobResult>;
   /** Search file contents by regex source (JS RegExp syntax). `flags` is the
    *  RegExp flags string (e.g. "i" for case-insensitive; the tool derives it).
-   *  Rejects on invalid regex or a missing explicit `path`. */
+   *  Rejects on invalid regex or when an explicit `options.path` does not exist. */
   grep(pattern: string, flags: string, options?: GrepOptions): Promise<GrepPlatformResult>;
 }
