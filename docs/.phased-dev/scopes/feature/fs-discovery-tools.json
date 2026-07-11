@@ -1,0 +1,65 @@
+{
+  "schemaVersion": 1,
+  "id": "feature/fs-discovery-tools",
+  "type": "feature",
+  "name": "fs-discovery-tools",
+  "pipeline": [
+    {
+      "phase": "research",
+      "agent": "researcher",
+      "outputCheck": "docs/feature/fs-discovery-tools/research/*.md"
+    },
+    {
+      "phase": "engineering",
+      "agent": "feature-architect",
+      "outputCheck": "docs/feature/fs-discovery-tools/engineering/*.md"
+    },
+    {
+      "phase": "plan",
+      "agent": "planner",
+      "outputCheck": [
+        "docs/feature/fs-discovery-tools/plan/implementation-plan.md",
+        "docs/feature/fs-discovery-tools/tasks/task-*/brief.md"
+      ]
+    },
+    {
+      "phase": "implement",
+      "agent": null,
+      "outputCheck": [
+        "docs/feature/fs-discovery-tools/tasks/task-*/brief.md",
+        "docs/feature/fs-discovery-tools/tasks/task-*/completion.md"
+      ]
+    }
+  ],
+  "currentPhase": "implement",
+  "phaseStatus": "complete",
+  "paths": {
+    "researchDir": "docs/feature/fs-discovery-tools/research/",
+    "engineeringDir": "docs/feature/fs-discovery-tools/engineering/",
+    "plan": "docs/feature/fs-discovery-tools/plan/implementation-plan.md",
+    "tasks": "docs/feature/fs-discovery-tools/tasks/",
+    "decisions": "docs/feature/fs-discovery-tools/decisions.md"
+  },
+  "history": [
+    {
+      "phase": "research",
+      "completedAt": "2026-07-10T15:10:00+08:00",
+      "approvedAt": "2026-07-10T15:10:00+08:00"
+    },
+    {
+      "phase": "engineering",
+      "completedAt": "2026-07-10T16:25:00+08:00",
+      "approvedAt": "2026-07-10T16:25:00+08:00"
+    },
+    {
+      "phase": "plan",
+      "completedAt": "2026-07-10T16:45:00+08:00",
+      "approvedAt": "2026-07-10T16:45:00+08:00"
+    },
+    {
+      "phase": "implement",
+      "completedAt": "2026-07-10T18:40:00+08:00",
+      "approvedAt": "2026-07-10T18:40:00+08:00"
+    }
+  ]
+}

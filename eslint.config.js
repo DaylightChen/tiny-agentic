@@ -20,7 +20,7 @@ export default tseslint.config(
   // Core package: no UI deps, no Node built-ins / `process` outside platform/node.ts.
   {
     files: ["packages/core/src/**/*.ts"],
-    ignores: ["packages/core/src/platform/node.ts"],
+    ignores: ["packages/core/src/platform/**"],
     rules: {
       "no-restricted-imports": ["error", {
         paths: [

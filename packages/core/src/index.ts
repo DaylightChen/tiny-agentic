@@ -12,12 +12,15 @@ export type { Message, ContentBlock, TextBlock, ToolUseBlock, ToolResultBlock } 
 export type { Tool, ToolCallContext } from "./types/tool.js";
 export { defineTool } from "./types/tool.js";
 export type { Provider, ProviderRequest, ProviderEvent, ToolSchema, Logger, LogEntry } from "./types/provider.js";
-export type { Platform, ExecOptions, ExecResult } from "./types/platform.js";
+export type { Platform, ExecOptions, ExecResult, DirEntry, GlobOptions, GlobResult, GrepMatch, GrepOptions, GrepPlatformResult } from "./types/platform.js";
 
 export { readFileTool } from "./tools/builtin/readFile.js";
 export { writeFileTool } from "./tools/builtin/writeFile.js";
 export { bashTool } from "./tools/builtin/bash.js";
 export { editFileTool } from "./tools/builtin/editFile.js";
+export { lsTool } from "./tools/builtin/ls.js";
+export { globTool } from "./tools/builtin/glob.js";
+export { grepTool } from "./tools/builtin/grep.js";
 export { createTaskTool } from "./tools/builtin/task.js";
 export type { CreateTaskToolOptions, ChildSpec } from "./tools/builtin/task.js";
 export type { SubagentChildEvent } from "./types/events.js";

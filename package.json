@@ -7,7 +7,8 @@
     "test": "pnpm -r test",
     "lint": "eslint packages/*/src --max-warnings 0",
     "typecheck": "pnpm -r typecheck",
-    "example": "tsx examples/basic-run.ts"
+    "example": "tsx examples/basic-run.ts",
+    "example:fs-discovery": "tsx examples/fs-discovery-run.ts"
   },
   "devDependencies": {
     "typescript": "^5.7.0",

@@ -42,6 +42,19 @@ class MockPlatform implements Platform {
   exec(): Promise<ExecResult> {
     return Promise.resolve({ stdout: "", stderr: "", exitCode: 0 });
   }
+
+  listDir() {
+    return Promise.reject(new Error("not configured"));
+  }
+  stat() {
+    return Promise.reject(new Error("not configured"));
+  }
+  glob() {
+    return Promise.reject(new Error("not configured"));
+  }
+  grep() {
+    return Promise.reject(new Error("not configured"));
+  }
 }
 
 const ctx: ToolCallContext = {};

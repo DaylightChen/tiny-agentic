@@ -30,6 +30,19 @@ class MockPlatform implements Platform {
   writeFile(): Promise<void> {
     return Promise.reject(new Error("writeFile not configured in bash MockPlatform"));
   }
+
+  listDir() {
+    return Promise.reject(new Error("not configured"));
+  }
+  stat() {
+    return Promise.reject(new Error("not configured"));
+  }
+  glob() {
+    return Promise.reject(new Error("not configured"));
+  }
+  grep() {
+    return Promise.reject(new Error("not configured"));
+  }
 }
 
 describe("bashTool", () => {

@@ -54,6 +54,19 @@ class MockPlatform implements Platform {
     }
     return this.execResponses.shift() ?? { stdout: "", stderr: "", exitCode: 0 };
   }
+
+  listDir() {
+    return Promise.reject(new Error("not configured"));
+  }
+  stat() {
+    return Promise.reject(new Error("not configured"));
+  }
+  glob() {
+    return Promise.reject(new Error("not configured"));
+  }
+  grep() {
+    return Promise.reject(new Error("not configured"));
+  }
 }
 
 describe("buildEnvContext (7.13 env context injection)", () => {

@@ -1,9 +1,28 @@
-import { readFile, writeFile } from "node:fs/promises";
+import { readFile, writeFile, readdir, lstat } from "node:fs/promises";
+import { join } from "node:path";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
-import type { Platform, ExecOptions, ExecResult } from "../types/platform.js";
+import type { Dirent, Stats } from "node:fs";
+import type {
+  Platform,
+  ExecOptions,
+  ExecResult,
+  DirEntry,
+  GlobOptions,
+  GlobResult,
+  GrepOptions,
+  GrepPlatformResult,
+} from "../types/platform.js";
+import { globImpl, grepImpl } from "./fs-discovery.js";
 
 const execFileAsync = promisify(execFile);
+
+function direntType(entry: Dirent | Stats): DirEntry["type"] {
+  if (entry.isSymbolicLink()) return "symlink";
+  if (entry.isDirectory()) return "directory";
+  if (entry.isFile()) return "file";
+  return "other";
+}
 
 /**
  * Node.js implementation of the Platform interface.
@@ -60,5 +79,55 @@ export class NodePlatform implements Platform {
         exitCode: typeof execErr.code === "number" ? execErr.code : 1,
       };
     }
+  }
+
+  async listDir(path: string): Promise<DirEntry[]> {
+    let entries: Dirent[];
+    try {
+      entries = await readdir(path, { withFileTypes: true });
+    } catch (err: unknown) {
+      const code = (err as { code?: string }).code;
+      if (code === "ENOENT") throw new Error(`ls: path does not exist: ${path}`);
+      if (code === "ENOTDIR") throw new Error(`ls: not a directory: ${path}`);
+      throw err;
+    }
+    return Promise.all(
+      entries.map(async (entry): Promise<DirEntry> => {
+        const full = join(path, entry.name);
+        const stats = await lstat(full);
+        return {
+          name: entry.name,
+          type: direntType(entry),
+          size: entry.isDirectory() ? 0 : stats.size,
+          mtimeMs: stats.mtimeMs,
+        };
+      }),
+    );
+  }
+
+  async stat(path: string): Promise<DirEntry> {
+    let stats: Stats;
+    try {
+      stats = await lstat(path);
+    } catch (err: unknown) {
+      const code = (err as { code?: string }).code;
+      if (code === "ENOENT") throw new Error(`ls: path does not exist: ${path}`);
+      throw err;
+    }
+    const type = direntType(stats);
+    return {
+      name: path,
+      type,
+      size: type === "directory" ? 0 : stats.size,
+      mtimeMs: stats.mtimeMs,
+    };
+  }
+
+  async glob(pattern: string, options?: GlobOptions): Promise<GlobResult> {
+    return globImpl(this.cwd(), pattern, options ?? {});
+  }
+
+  async grep(pattern: string, flags: string, options?: GrepOptions): Promise<GrepPlatformResult> {
+    return grepImpl(this.cwd(), pattern, flags, options ?? {});
   }
 }

@@ -90,3 +90,23 @@
 **Symptom:** Child token spend surfaces only in the run's cumulative `usage` on the TERMINAL event, and per-child on each `subagent_event`(terminal)'s `usage`. It is NEVER included in any `turn_complete.usage`, which carries the parent's own per-turn tokens only. A consumer building a live token meter by summing `turn_complete.usage` deltas under-counts by the entire child spend.
 **Workaround:** For live child cost, read each `subagent_event`(terminal)'s `usage`; for the authoritative running total, read the terminal event's cumulative `usage`. Do not reconstruct cost from `turn_complete` alone.
 **Revisit when:** A live, child-inclusive per-turn usage signal is wanted; would require attributing folded child usage onto `turn_complete` (a small additive change if a consumer needs it).
+
+---
+
+## Pure-JS `grep`/`glob` performance on very large repos (feature/fs-discovery-tools, R3)
+
+**Discovered:** 2026-07-10 (implement, feature/fs-discovery-tools Task 05)
+**Status:** open (accepted trade-off, R3)
+**Symptom:** The discovery tools' `grep`/`glob` are implemented in pure JS (a hand-rolled walk + `picomatch` + the `ignore` lib), not ripgrep. On a very large repository this is slower than a native ripgrep-backed search.
+**Workaround:** Nested-`.gitignore` pruning skips whole subtrees (e.g. `node_modules`) early, the 250-result cap bounds output, and first-match short-circuit stops per-file scanning once a file qualifies. On this repo a typical grep over `packages/core/src` completes sub-second (see `examples/fs-discovery-run.ts`).
+**Revisit when:** A very large repo makes pure-JS latency unacceptable. The future path is a NodePlatform-internal ripgrep optimization behind the unchanged `Platform.grep` seam — no contract change needed.
+
+---
+
+## Deferred grep features: `multiline` regex and ripgrep-style `type` filter (feature/fs-discovery-tools)
+
+**Discovered:** 2026-07-10 (implement, feature/fs-discovery-tools Task 05)
+**Status:** open (deferred by design, §4)
+**Symptom:** `grep` has no `multiline` mode (patterns cannot span newlines) and no ripgrep-style `type` filter (e.g. `--type ts`); the current filter is the `glob` file-name filter only. Both are out of v1 scope.
+**Workaround:** Use the `glob` filter for file selection and single-line patterns. No behavioral gap for the headline discovery flows.
+**Revisit when:** Multiline matching or type-based filtering is wanted. The `GrepOptions` schema/seam can accommodate both later as additive options without a contract break.

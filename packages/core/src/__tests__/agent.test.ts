@@ -94,6 +94,18 @@ class MockPlatform implements Platform {
     // Non-zero exit → buildEnvContext skips the Git branch/status lines.
     return Promise.resolve({ stdout: "", stderr: "", exitCode: 1 });
   }
+  listDir() {
+    return Promise.reject(new Error("not configured"));
+  }
+  stat() {
+    return Promise.reject(new Error("not configured"));
+  }
+  glob() {
+    return Promise.reject(new Error("not configured"));
+  }
+  grep() {
+    return Promise.reject(new Error("not configured"));
+  }
 }
 
 describe("Agent.run", () => {
