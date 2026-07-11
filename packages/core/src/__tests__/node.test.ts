@@ -187,6 +187,7 @@ describe("NodePlatform.stat", () => {
 
     const entry = await platform.stat(file);
 
+    expect(entry.name).toBe("f.txt");
     expect(entry.type).toBe("file");
     expect(entry.size).toBe(4);
     expect(typeof entry.mtimeMs).toBe("number");

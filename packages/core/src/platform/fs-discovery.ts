@@ -1,4 +1,4 @@
-import { readdir, lstat, readFile } from "node:fs/promises";
+import { readdir, lstat, readFile, stat } from "node:fs/promises";
 import { join, relative, resolve, sep } from "node:path";
 import ignore from "ignore";
 import picomatch from "picomatch";
@@ -120,19 +120,19 @@ async function* walk(
         continue;
       }
 
-      // Do not descend symlinked directories; symlinked files are listed as
-      // regular entries. A symlink whose target is a file falls through here.
+      // Follow a symlink only to classify its target. File targets are yielded;
+      // directory and broken targets are skipped, and directories are never descended.
       if (entry.isSymbolicLink()) {
-        let stats;
+        let targetStats;
         try {
-          stats = await lstat(abs);
+          targetStats = await stat(abs);
         } catch {
           continue;
         }
-        // isSymbolicLink() from lstat is always true; resolve the target type.
+        if (!targetStats.isFile()) continue;
         if (!options.includeHidden && isHidden(name)) continue;
         if (isIgnored(stack, abs)) continue;
-        yield { path: abs, mtimeMs: stats.mtimeMs };
+        yield { path: abs, mtimeMs: targetStats.mtimeMs };
         continue;
       }
 
@@ -192,7 +192,7 @@ export async function globImpl(
     throw new Error(`glob: base directory does not exist: ${base}`);
   }
   if (!baseStats.isDirectory()) {
-    throw new Error(`glob: base directory does not exist: ${base}`);
+    throw new Error(`glob: base path is not a directory: ${base}`);
   }
 
   const isMatch = picomatch(pattern, { dot: options.includeHidden ?? false });

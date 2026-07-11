@@ -176,6 +176,25 @@ describe("fs-discovery — symlinks", () => {
     const res = await platform.glob("*.txt", { cwd: dir });
     expect(basenames(res.paths).sort()).toEqual(["link.txt", "target.txt"]);
   });
+
+  it("excludes a symlink whose target is a directory from glob results", async () => {
+    await mkdirp(join(dir, "target-dir"));
+    await platform.exec(`ln -s ${join(dir, "target-dir")} ${join(dir, "dir-link")}`, {
+      shell: true,
+    });
+
+    const res = await platform.glob("**/*", { cwd: dir });
+    expect(basenames(res.paths)).not.toContain("dir-link");
+  });
+
+  it("excludes a broken symlink from glob results", async () => {
+    await platform.exec(`ln -s ${join(dir, "missing-target")} ${join(dir, "broken-link")}`, {
+      shell: true,
+    });
+
+    const res = await platform.glob("**/*", { cwd: dir });
+    expect(basenames(res.paths)).not.toContain("broken-link");
+  });
 });
 
 describe("fs-discovery — ordering (NODE_ENV=test)", () => {
@@ -371,6 +390,14 @@ describe("fs-discovery — cancellation & missing base", () => {
     const missing = join(dir, "no-such-dir");
     await expect(platform.glob("*", { cwd: missing })).rejects.toThrow(
       `glob: base directory does not exist: ${missing}`,
+    );
+  });
+
+  it("glob reports when the base path exists but is not a directory", async () => {
+    const file = join(dir, "file.txt");
+    await platform.writeFile(file, "x");
+    await expect(platform.glob("*", { cwd: file })).rejects.toThrow(
+      `glob: base path is not a directory: ${file}`,
     );
   });
 });
