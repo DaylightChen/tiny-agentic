@@ -1,0 +1,44 @@
+{
+  "schemaVersion": 1,
+  "id": "feature/core-runtime-hardening",
+  "type": "feature",
+  "name": "core-runtime-hardening",
+  "pipeline": [
+    {
+      "phase": "research",
+      "agent": "researcher",
+      "outputCheck": "docs/feature/core-runtime-hardening/research/*.md"
+    },
+    {
+      "phase": "engineering",
+      "agent": "feature-architect",
+      "outputCheck": "docs/feature/core-runtime-hardening/engineering/*.md"
+    },
+    {
+      "phase": "plan",
+      "agent": "planner",
+      "outputCheck": [
+        "docs/feature/core-runtime-hardening/plan/implementation-plan.md",
+        "docs/feature/core-runtime-hardening/tasks/task-*/brief.md"
+      ]
+    },
+    {
+      "phase": "implement",
+      "agent": null,
+      "outputCheck": [
+        "docs/feature/core-runtime-hardening/tasks/task-*/brief.md",
+        "docs/feature/core-runtime-hardening/tasks/task-*/completion.md"
+      ]
+    }
+  ],
+  "currentPhase": "research",
+  "phaseStatus": "in_progress",
+  "paths": {
+    "researchDir": "docs/feature/core-runtime-hardening/research/",
+    "engineeringDir": "docs/feature/core-runtime-hardening/engineering/",
+    "plan": "docs/feature/core-runtime-hardening/plan/implementation-plan.md",
+    "tasks": "docs/feature/core-runtime-hardening/tasks/",
+    "decisions": "docs/feature/core-runtime-hardening/decisions.md"
+  },
+  "history": []
+}
