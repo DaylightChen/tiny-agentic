@@ -94,6 +94,12 @@ class BlockingSignalHonoringProvider implements Provider {
 }
 
 class MockPlatform implements Platform {
+  resolvePath(path: string): string {
+    return path;
+  }
+  formatPath(path: string): string {
+    return path;
+  }
   cwd(): string {
     return "/work";
   }

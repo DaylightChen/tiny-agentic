@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, afterEach } from "vitest";
+import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { join } from "node:path";
 
 import { NodePlatform } from "../platform/node.js";
@@ -16,6 +16,35 @@ import { NodePlatform } from "../platform/node.js";
  * timeout option kills it after 100 ms, so the wall-clock cost is minimal.
  */
 const platform = new NodePlatform();
+
+class FixedCwdNodePlatform extends NodePlatform {
+  constructor(private readonly fixedCwd: string) {
+    super();
+  }
+
+  override cwd(): string {
+    return this.fixedCwd;
+  }
+}
+
+describe("NodePlatform path contract", () => {
+  it("resolves relative paths and formats cwd descendants, cwd itself, and outside paths", () => {
+    const fixed = new FixedCwdNodePlatform("/work");
+
+    expect(fixed.resolvePath("src/../file.ts")).toBe("/work/file.ts");
+    expect(fixed.formatPath("/work/src/../file.ts")).toBe("file.ts");
+    expect(fixed.formatPath("/work")).toBe(".");
+    expect(fixed.formatPath("/outside/../other/file.ts")).toBe("/other/file.ts");
+    expect(fixed.formatPath("/")).toBe("/");
+  });
+
+  it("formats the filesystem root and its descendants using native root semantics", () => {
+    const fixed = new FixedCwdNodePlatform("/");
+
+    expect(fixed.formatPath("/")).toBe(".");
+    expect(fixed.formatPath("/a")).toBe("a");
+  });
+});
 
 describe("NodePlatform.exec — shell: true path", () => {
   it("returns stdout/stderr/exitCode 0 for a simple echo command", async () => {
@@ -152,6 +181,50 @@ describe("NodePlatform.listDir", () => {
   it("resolves to an empty array for an empty directory", async () => {
     const entries = await platform.listDir(dir);
     expect(entries).toEqual([]);
+  });
+
+  it("orders production entries by descending mtime, then ascending code-unit name", async () => {
+    vi.stubEnv("NODE_ENV", "production");
+    try {
+      for (const name of ["z-old.txt", "b-tied.txt", "a-tied.txt"]) {
+        await platform.writeFile(join(dir, name), name);
+      }
+      const { exitCode } = await platform.exec(
+        `touch -t 202001010000 ${join(dir, "z-old.txt")} && ` +
+          `touch -t 202401010000 ${join(dir, "b-tied.txt")} ${join(dir, "a-tied.txt")}`,
+        { shell: true },
+      );
+      expect(exitCode).toBe(0);
+
+      const entries = await platform.listDir(dir);
+
+      expect(entries.map((entry) => entry.name)).toEqual([
+        "a-tied.txt",
+        "b-tied.txt",
+        "z-old.txt",
+      ]);
+      expect(entries[0]!.mtimeMs).toBe(entries[1]!.mtimeMs);
+      expect(entries[1]!.mtimeMs).toBeGreaterThan(entries[2]!.mtimeMs);
+    } finally {
+      vi.unstubAllEnvs();
+    }
+  });
+
+  it("keeps test-mode entries name-ascending regardless of mtime", async () => {
+    for (const name of ["a-old.txt", "z-new.txt"]) {
+      await platform.writeFile(join(dir, name), name);
+    }
+    const { exitCode } = await platform.exec(
+      `touch -t 202001010000 ${join(dir, "a-old.txt")} && ` +
+        `touch -t 202401010000 ${join(dir, "z-new.txt")}`,
+      { shell: true },
+    );
+    expect(exitCode).toBe(0);
+
+    const entries = await platform.listDir(dir);
+
+    expect(entries.map((entry) => entry.name)).toEqual(["a-old.txt", "z-new.txt"]);
+    expect(entries[0]!.mtimeMs).toBeLessThan(entries[1]!.mtimeMs);
   });
 
   it("rejects with 'ls: path does not exist: <path>' for a missing path", async () => {

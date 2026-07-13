@@ -78,6 +78,12 @@ class MockPlatform implements Platform {
     private readonly opts: { cwd?: string; fileContent?: string } = {},
   ) {}
 
+  resolvePath(path: string): string {
+    return path;
+  }
+  formatPath(path: string): string {
+    return path;
+  }
   cwd(): string {
     return this.opts.cwd ?? "/work";
   }

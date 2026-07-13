@@ -65,6 +65,8 @@ function makeMockPlatform() {
   const execCalls: Array<{ cmd: string; opts: ExecOptions | undefined }> = [];
 
   const platform: Platform = {
+    resolvePath: (path: string) => path,
+    formatPath: (path: string) => path,
     cwd: () => "/work",
     readFile: (_path: string) => Promise.reject(new Error("readFile not used")),
     writeFile: (_path: string, _content: string): Promise<void> => Promise.resolve(),
