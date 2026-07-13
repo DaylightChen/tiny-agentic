@@ -5,14 +5,14 @@
 > The machine-readable source of truth is `docs/.phased-dev/scopes/feature/core-runtime-hardening.json`.
 
 ## Current Phase
-**research** (in progress)
+**engineering** (in progress)
 
 ## Last Completed
-_(none yet)_
+- `research` approved (2026-07-13): `docs/feature/core-runtime-hardening/research/2026-07-13-core-runtime-hardening-research.md`.
 
 ## What's Next
-- The `researcher` is gathering evidence for stop-reason terminal semantics, the strict Platform portability boundary, and safe contiguous tool batching.
-- Review the research output, then run `/phased-dev:advance-phase` to move to `engineering`.
+- The `feature-architect` is producing the binding engineering spec for stop-reason semantics, the portability seam, safe batching, and release readiness.
+- Review the engineering output, then run `/phased-dev:advance-phase` to move to `plan`.
 
 ## Task Progress
 _(appears after the `plan` phase produces task briefs)_
