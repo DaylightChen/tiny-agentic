@@ -227,20 +227,30 @@ describe("translateStreamEvent — malformed JSON (edge case §6.1)", () => {
 });
 
 describe("translateStreamEvent — stop_reason caching", () => {
-  it("emits the stop_reason cached from message_delta on the following message_stop", () => {
-    const events = [
-      { type: "message_delta", delta: { stop_reason: "tool_use" } },
+  it.each([
+    ["end_turn", { kind: "end_turn", raw: "end_turn" }],
+    ["tool_use", { kind: "tool_use", raw: "tool_use" }],
+    ["max_tokens", { kind: "max_tokens", raw: "max_tokens" }],
+    ["stop_sequence", { kind: "stop_sequence", raw: "stop_sequence" }],
+    ["pause_turn", { kind: "pause_turn", raw: "pause_turn" }],
+    ["refusal", { kind: "refusal", raw: "refusal" }],
+    [
+      "model_context_window_exceeded",
+      { kind: "model_context_window_exceeded", raw: "model_context_window_exceeded" },
+    ],
+    ["future_reason", { kind: "other", raw: "future_reason" }],
+  ] as const)("maps Anthropic stop_reason %s exactly", (nativeReason, expected) => {
+    const out = run([
+      { type: "message_delta", delta: { stop_reason: nativeReason } },
       { type: "message_stop" },
-    ];
+    ]);
 
-    const out = run(events);
-
-    expect(out).toEqual([{ type: "message_stop", stopReason: "tool_use" }]);
+    expect(out).toEqual([{ type: "message_stop", stopReason: expected }]);
   });
 
-  it("defaults stopReason to 'end_turn' when no message_delta preceded message_stop", () => {
+  it("maps an absent stop_reason to other/null instead of inventing natural completion", () => {
     const out = run([{ type: "message_stop" }]);
-    expect(out).toEqual([{ type: "message_stop", stopReason: "end_turn" }]);
+    expect(out).toEqual([{ type: "message_stop", stopReason: { kind: "other", raw: null } }]);
   });
 
   it("message_delta itself emits nothing (the reason surfaces on message_stop)", () => {
@@ -424,7 +434,7 @@ describe("translateStreamEvent — usage capture", () => {
     const out = run(events);
     expect(out).toHaveLength(1);
     const evt = out[0]!;
-    expect(evt).toEqual({ type: "message_stop", stopReason: "end_turn" });
+    expect(evt).toEqual({ type: "message_stop", stopReason: { kind: "other", raw: null } });
     expect("usage" in evt).toBe(false);
   });
 

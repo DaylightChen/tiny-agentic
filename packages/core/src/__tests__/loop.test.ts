@@ -98,7 +98,7 @@ describe("agentLoop", () => {
     const provider = new MockProvider([
       [
         { type: "text_delta", text: "hi" },
-        { type: "message_stop", stopReason: "end_turn" },
+        { type: "message_stop", stopReason: { kind: "end_turn", raw: "end_turn" } },
       ],
     ]);
     const params = makeParams(provider, new ToolRegistry([]));
@@ -122,7 +122,7 @@ describe("agentLoop", () => {
       [
         { type: "reasoning_delta", text: "let me think" },
         { type: "text_delta", text: "answer" },
-        { type: "message_stop", stopReason: "end_turn" },
+        { type: "message_stop", stopReason: { kind: "end_turn", raw: "end_turn" } },
       ],
     ]);
     const params = makeParams(provider, new ToolRegistry([]));
@@ -154,11 +154,11 @@ describe("agentLoop", () => {
     const provider = new MockProvider([
       [
         { type: "tool_use", id: "t1", name: "ok_tool", input: {} },
-        { type: "message_stop", stopReason: "tool_use" },
+        { type: "message_stop", stopReason: { kind: "tool_use", raw: "tool_use" } },
       ],
       [
         { type: "text_delta", text: "done" },
-        { type: "message_stop", stopReason: "end_turn" },
+        { type: "message_stop", stopReason: { kind: "end_turn", raw: "end_turn" } },
       ],
     ]);
     const params = makeParams(provider, new ToolRegistry([okTool]));
@@ -188,7 +188,7 @@ describe("agentLoop", () => {
     // naturally — the maxTurns guard must stop it.
     const alwaysToolTurn: ProviderEvent[] = [
       { type: "tool_use", id: "t", name: "ok_tool", input: {} },
-      { type: "message_stop", stopReason: "tool_use" },
+      { type: "message_stop", stopReason: { kind: "tool_use", raw: "tool_use" } },
     ];
     const provider = new MockProvider([alwaysToolTurn, alwaysToolTurn, alwaysToolTurn]);
     const params = makeParams(provider, new ToolRegistry([okTool]), { maxTurns: 2 });
@@ -230,7 +230,7 @@ describe("agentLoop", () => {
 
   it("does not push an assistant message for an empty turn", async () => {
     const provider = new MockProvider([
-      [{ type: "message_stop", stopReason: "end_turn" }],
+      [{ type: "message_stop", stopReason: { kind: "end_turn", raw: "end_turn" } }],
     ]);
     const params = makeParams(provider, new ToolRegistry([]));
 
@@ -261,11 +261,11 @@ describe("agentLoop", () => {
       [
         { type: "tool_use", id: "ta", name: "tool_a", input: {} },
         { type: "tool_use", id: "tb", name: "tool_b", input: {} },
-        { type: "message_stop", stopReason: "tool_use" },
+        { type: "message_stop", stopReason: { kind: "tool_use", raw: "tool_use" } },
       ],
       [
         { type: "text_delta", text: "fin" },
-        { type: "message_stop", stopReason: "end_turn" },
+        { type: "message_stop", stopReason: { kind: "end_turn", raw: "end_turn" } },
       ],
     ]);
     const params = makeParams(provider, new ToolRegistry([toolA, toolB]));
@@ -301,7 +301,7 @@ describe("agentLoop", () => {
         { type: "text_delta", text: "a" },
         { type: "text_delta", text: "b" },
         { type: "text_delta", text: "c" },
-        { type: "message_stop", stopReason: "end_turn" },
+        { type: "message_stop", stopReason: { kind: "end_turn", raw: "end_turn" } },
       ],
     ]);
     const params = makeParams(provider, new ToolRegistry([]));
@@ -340,7 +340,7 @@ describe("agentLoop — usage accumulation", () => {
     const provider = new MockProvider([
       [
         { type: "text_delta", text: "hi" },
-        { type: "message_stop", stopReason: "end_turn" },
+        { type: "message_stop", stopReason: { kind: "end_turn", raw: "end_turn" } },
       ],
     ]);
     const params = makeParams(provider, new ToolRegistry([]));
@@ -363,7 +363,7 @@ describe("agentLoop — usage accumulation", () => {
         { type: "text_delta", text: "hello" },
         {
           type: "message_stop",
-          stopReason: "end_turn",
+          stopReason: { kind: "end_turn", raw: "end_turn" },
           usage: { inputTokens: 10, outputTokens: 5, cacheReadTokens: 0 },
         },
       ],
@@ -388,7 +388,7 @@ describe("agentLoop — usage accumulation", () => {
         { type: "tool_use", id: "t1", name: "ok_tool", input: {} },
         {
           type: "message_stop",
-          stopReason: "tool_use",
+          stopReason: { kind: "tool_use", raw: "tool_use" },
           usage: { inputTokens: 10, outputTokens: 5, cacheReadTokens: 0 },
         },
       ],
@@ -396,7 +396,7 @@ describe("agentLoop — usage accumulation", () => {
         { type: "text_delta", text: "done" },
         {
           type: "message_stop",
-          stopReason: "end_turn",
+          stopReason: { kind: "end_turn", raw: "end_turn" },
           usage: { inputTokens: 3, outputTokens: 2, cacheReadTokens: 0 },
         },
       ],
@@ -419,7 +419,7 @@ describe("agentLoop — usage accumulation", () => {
       { type: "tool_use", id: "t", name: "ok_tool", input: {} },
       {
         type: "message_stop",
-        stopReason: "tool_use",
+        stopReason: { kind: "tool_use", raw: "tool_use" },
         usage: { inputTokens, outputTokens, cacheReadTokens: 0 },
       },
     ];
@@ -460,7 +460,7 @@ describe("agentLoop — usage accumulation", () => {
           yield { type: "tool_use", id: "t1", name: "ok_tool", input: {} };
           yield {
             type: "message_stop",
-            stopReason: "tool_use",
+            stopReason: { kind: "tool_use", raw: "tool_use" },
             usage: { inputTokens: 10, outputTokens: 5, cacheReadTokens: 0 },
           };
         } else {
@@ -494,7 +494,7 @@ describe("agentLoop — usage accumulation", () => {
         { type: "text_delta", text: "hi" },
         {
           type: "message_stop",
-          stopReason: "end_turn",
+          stopReason: { kind: "end_turn", raw: "end_turn" },
           usage: { inputTokens: 10, outputTokens: 5, cacheReadTokens: 0 },
         },
       ],
@@ -516,7 +516,7 @@ describe("agentLoop — usage accumulation", () => {
     const provider = new MockProvider([
       [
         { type: "text_delta", text: "hi" },
-        { type: "message_stop", stopReason: "end_turn" },
+        { type: "message_stop", stopReason: { kind: "end_turn", raw: "end_turn" } },
       ],
     ]);
     const params = makeParams(provider, new ToolRegistry([]));
@@ -622,7 +622,7 @@ describe("agentLoop — subagent seams", () => {
         { type: "tool_use", id: "r1", name: "report_tool", input: {} },
         {
           type: "message_stop",
-          stopReason: "tool_use",
+          stopReason: { kind: "tool_use", raw: "tool_use" },
           usage: { inputTokens: 10, outputTokens: 5, cacheReadTokens: 0 },
         },
       ],
@@ -630,7 +630,7 @@ describe("agentLoop — subagent seams", () => {
         { type: "text_delta", text: "done" },
         {
           type: "message_stop",
-          stopReason: "end_turn",
+          stopReason: { kind: "end_turn", raw: "end_turn" },
           usage: { inputTokens: 3, outputTokens: 2, cacheReadTokens: 0 },
         },
       ],
@@ -659,7 +659,7 @@ describe("agentLoop — subagent seams", () => {
         { type: "tool_use", id: "r1", name: "TOOL", input: {} },
         {
           type: "message_stop",
-          stopReason: "tool_use",
+          stopReason: { kind: "tool_use", raw: "tool_use" },
           usage: { inputTokens: 10, outputTokens: 5, cacheReadTokens: 0 },
         },
       ],
@@ -667,7 +667,7 @@ describe("agentLoop — subagent seams", () => {
         { type: "text_delta", text: "done" },
         {
           type: "message_stop",
-          stopReason: "end_turn",
+          stopReason: { kind: "end_turn", raw: "end_turn" },
           usage: { inputTokens: 3, outputTokens: 2, cacheReadTokens: 0 },
         },
       ],
@@ -708,7 +708,7 @@ describe("agentLoop — subagent seams", () => {
         { type: "tool_use", id: "e1", name: "report_then_throw_tool", input: {} },
         {
           type: "message_stop",
-          stopReason: "tool_use",
+          stopReason: { kind: "tool_use", raw: "tool_use" },
           usage: { inputTokens: 10, outputTokens: 5, cacheReadTokens: 0 },
         },
       ],
@@ -716,7 +716,7 @@ describe("agentLoop — subagent seams", () => {
         { type: "text_delta", text: "recovered" },
         {
           type: "message_stop",
-          stopReason: "end_turn",
+          stopReason: { kind: "end_turn", raw: "end_turn" },
           usage: { inputTokens: 3, outputTokens: 2, cacheReadTokens: 0 },
         },
       ],
@@ -756,11 +756,11 @@ describe("agentLoop — subagent seams", () => {
     const provider = new MockProvider([
       [
         { type: "tool_use", id: "e1", name: "emit_tool", input: {} },
-        { type: "message_stop", stopReason: "tool_use" },
+        { type: "message_stop", stopReason: { kind: "tool_use", raw: "tool_use" } },
       ],
       [
         { type: "text_delta", text: "fin" },
-        { type: "message_stop", stopReason: "end_turn" },
+        { type: "message_stop", stopReason: { kind: "end_turn", raw: "end_turn" } },
       ],
     ]);
     const params = makeParams(provider, new ToolRegistry([emittingTool]));
@@ -833,11 +833,11 @@ describe("agentLoop — subagent seams", () => {
       [
         { type: "tool_use", id: "ta", name: "emit_a", input: {} },
         { type: "tool_use", id: "tb", name: "emit_b", input: {} },
-        { type: "message_stop", stopReason: "tool_use" },
+        { type: "message_stop", stopReason: { kind: "tool_use", raw: "tool_use" } },
       ],
       [
         { type: "text_delta", text: "fin" },
-        { type: "message_stop", stopReason: "end_turn" },
+        { type: "message_stop", stopReason: { kind: "end_turn", raw: "end_turn" } },
       ],
     ]);
     const params = makeParams(provider, new ToolRegistry([emitA, emitB]));
@@ -878,11 +878,11 @@ describe("agentLoop — subagent seams", () => {
     const provider = new MockProvider([
       [
         { type: "tool_use", id: "x1", name: "id_tool", input: {} },
-        { type: "message_stop", stopReason: "tool_use" },
+        { type: "message_stop", stopReason: { kind: "tool_use", raw: "tool_use" } },
       ],
       [
         { type: "text_delta", text: "ok" },
-        { type: "message_stop", stopReason: "end_turn" },
+        { type: "message_stop", stopReason: { kind: "end_turn", raw: "end_turn" } },
       ],
     ]);
     const params = makeParams(provider, new ToolRegistry([idEchoTool]));
@@ -900,11 +900,11 @@ describe("agentLoop — subagent seams", () => {
     const provider = new MockProvider([
       [
         { type: "tool_use", id: "x1", name: "id_emit_tool", input: {} },
-        { type: "message_stop", stopReason: "tool_use" },
+        { type: "message_stop", stopReason: { kind: "tool_use", raw: "tool_use" } },
       ],
       [
         { type: "text_delta", text: "ok" },
-        { type: "message_stop", stopReason: "end_turn" },
+        { type: "message_stop", stopReason: { kind: "end_turn", raw: "end_turn" } },
       ],
     ]);
     const params = makeParams(provider, new ToolRegistry([idEchoEmitTool]));
@@ -936,11 +936,11 @@ describe("agentLoop — subagent seams", () => {
     const provider = new MockProvider([
       [
         { type: "tool_use", id: "t1", name: "ok_tool", input: {} },
-        { type: "message_stop", stopReason: "tool_use" },
+        { type: "message_stop", stopReason: { kind: "tool_use", raw: "tool_use" } },
       ],
       [
         { type: "text_delta", text: "done" },
-        { type: "message_stop", stopReason: "end_turn" },
+        { type: "message_stop", stopReason: { kind: "end_turn", raw: "end_turn" } },
       ],
     ]);
     const params = makeParams(provider, new ToolRegistry([okTool]));
@@ -974,7 +974,7 @@ describe("agentLoop — subagent seams", () => {
         { type: "tool_use", id: "t1", name: "ok_tool", input: {} },
         {
           type: "message_stop",
-          stopReason: "tool_use",
+          stopReason: { kind: "tool_use", raw: "tool_use" },
           usage: { inputTokens: 10, outputTokens: 5, cacheReadTokens: 0 },
         },
       ],
@@ -982,7 +982,7 @@ describe("agentLoop — subagent seams", () => {
         { type: "text_delta", text: "done" },
         {
           type: "message_stop",
-          stopReason: "end_turn",
+          stopReason: { kind: "end_turn", raw: "end_turn" },
           usage: { inputTokens: 3, outputTokens: 2, cacheReadTokens: 0 },
         },
       ],
@@ -1029,7 +1029,7 @@ describe("agentLoop — subagent seams", () => {
         { type: "tool_use", id: "m1", name: "multi_report_tool", input: {} },
         {
           type: "message_stop",
-          stopReason: "tool_use",
+          stopReason: { kind: "tool_use", raw: "tool_use" },
           usage: { inputTokens: 10, outputTokens: 5, cacheReadTokens: 0 },
         },
       ],
@@ -1037,7 +1037,7 @@ describe("agentLoop — subagent seams", () => {
         { type: "text_delta", text: "done" },
         {
           type: "message_stop",
-          stopReason: "end_turn",
+          stopReason: { kind: "end_turn", raw: "end_turn" },
           usage: { inputTokens: 3, outputTokens: 2, cacheReadTokens: 0 },
         },
       ],
@@ -1078,11 +1078,11 @@ describe("agentLoop — subagent seams", () => {
     const provider = new MockProvider([
       [
         { type: "tool_use", id: "term1", name: "terminal_emit_tool", input: {} },
-        { type: "message_stop", stopReason: "tool_use" },
+        { type: "message_stop", stopReason: { kind: "tool_use", raw: "tool_use" } },
       ],
       [
         { type: "text_delta", text: "fin" },
-        { type: "message_stop", stopReason: "end_turn" },
+        { type: "message_stop", stopReason: { kind: "end_turn", raw: "end_turn" } },
       ],
     ]);
     const params = makeParams(provider, new ToolRegistry([terminalEmitTool]));
@@ -1119,11 +1119,11 @@ describe("agentLoop — subagent seams", () => {
     const provider = new MockProvider([
       [
         { type: "tool_use", id: "cu1", name: "child_tooluse_emit_tool", input: {} },
-        { type: "message_stop", stopReason: "tool_use" },
+        { type: "message_stop", stopReason: { kind: "tool_use", raw: "tool_use" } },
       ],
       [
         { type: "text_delta", text: "fin" },
-        { type: "message_stop", stopReason: "end_turn" },
+        { type: "message_stop", stopReason: { kind: "end_turn", raw: "end_turn" } },
       ],
     ]);
     const params = makeParams(provider, new ToolRegistry([childToolUseEmitTool]));
@@ -1158,11 +1158,11 @@ describe("agentLoop — subagent seams", () => {
     const provider = new MockProvider([
       [
         { type: "tool_use", id: "et1", name: "emit_then_throw_tool", input: {} },
-        { type: "message_stop", stopReason: "tool_use" },
+        { type: "message_stop", stopReason: { kind: "tool_use", raw: "tool_use" } },
       ],
       [
         { type: "text_delta", text: "recovered" },
-        { type: "message_stop", stopReason: "end_turn" },
+        { type: "message_stop", stopReason: { kind: "end_turn", raw: "end_turn" } },
       ],
     ]);
     const params = makeParams(provider, new ToolRegistry([emitThenThrowTool]));
@@ -1199,11 +1199,11 @@ describe("agentLoop — subagent seams", () => {
       [
         { type: "tool_use", id: "e1", name: "emit_tool", input: {} },
         { type: "tool_use", id: "o1", name: "ok_tool", input: {} },
-        { type: "message_stop", stopReason: "tool_use" },
+        { type: "message_stop", stopReason: { kind: "tool_use", raw: "tool_use" } },
       ],
       [
         { type: "text_delta", text: "fin" },
-        { type: "message_stop", stopReason: "end_turn" },
+        { type: "message_stop", stopReason: { kind: "end_turn", raw: "end_turn" } },
       ],
     ]);
     const params = makeParams(provider, new ToolRegistry([emittingTool, okTool]));

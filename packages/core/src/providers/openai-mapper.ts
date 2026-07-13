@@ -1,5 +1,5 @@
 import type { ContentBlock, Message } from "../types/messages.js";
-import type { ProviderEvent, ProviderRequest, ToolSchema } from "../types/provider.js";
+import type { ProviderEvent, ProviderRequest, StopReason, ToolSchema } from "../types/provider.js";
 import type { Usage } from "../types/usage.js";
 
 // Malformed streamed tool input (§6.1) is signalled provider-agnostically by the
@@ -167,6 +167,7 @@ export class ToolCallAccumulator {
   // keyed by tool_calls[].index
   private readonly calls = new Map<number, { id: string; name: string; args: string }>();
   private finishReason: string | undefined;
+  private refusalObserved = false;
   private chunkUsage: Usage | undefined;
 
   /**
@@ -194,6 +195,10 @@ export class ToolCallAccumulator {
 
     if (typeof delta.content === "string" && delta.content.length > 0) {
       events.push({ type: "text_delta", text: delta.content });
+    }
+
+    if (typeof delta.refusal === "string" && delta.refusal.trim().length > 0) {
+      this.refusalObserved = true;
     }
 
     if (Array.isArray(delta.tool_calls)) {
@@ -258,27 +263,32 @@ export class ToolCallAccumulator {
     }
     events.push({
       type: "message_stop",
-      stopReason: mapFinishReason(this.finishReason),
+      stopReason: normalizeStopReason(this.finishReason, this.refusalObserved),
       ...(this.chunkUsage !== undefined ? { usage: this.chunkUsage } : {}),
     });
     return events;
   }
 }
 
-/** finish_reason → stopReason. Unknown values pass through (legal via the | string union). */
-function mapFinishReason(reason: string | undefined): string {
+function normalizeStopReason(reason: string | undefined, refusalObserved: boolean): StopReason {
+  if (refusalObserved && (reason === "stop" || reason === undefined)) {
+    return { kind: "refusal", raw: reason ?? null };
+  }
+
   switch (reason) {
     case "stop":
-      return "end_turn";
+      return { kind: "end_turn", raw: reason };
     case "tool_calls":
-      return "tool_use";
+    case "function_call":
+      return { kind: "tool_use", raw: reason };
     case "length":
-      return "max_tokens";
+      return { kind: "max_tokens", raw: reason };
+    case "content_filter":
+      return { kind: "content_filter", raw: reason };
     case undefined:
-      // No finish_reason ever seen (abort/disconnect) — default to end_turn.
-      return "end_turn";
+      return { kind: "other", raw: null };
     default:
-      return reason;
+      return { kind: "other", raw: reason };
   }
 }
 

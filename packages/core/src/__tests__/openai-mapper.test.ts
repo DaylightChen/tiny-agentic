@@ -325,7 +325,7 @@ describe("translateChunk — text streaming", () => {
     expect(out).toEqual([
       { type: "text_delta", text: "Hello, " },
       { type: "text_delta", text: "world" },
-      { type: "message_stop", stopReason: "end_turn" },
+      { type: "message_stop", stopReason: { kind: "end_turn", raw: "stop" } },
     ]);
     expect(out.some((e) => e.type === "tool_use")).toBe(false);
     expect(out.filter((e) => e.type === "message_stop")).toHaveLength(1);
@@ -334,7 +334,7 @@ describe("translateChunk — text streaming", () => {
   it("treats an empty content fragment as no text_delta", () => {
     // Only the leading empty-content delta + finish; expect just message_stop.
     const out = run([{ choices: [{ index: 0, delta: { content: "" }, finish_reason: "stop" }] }]);
-    expect(out).toEqual([{ type: "message_stop", stopReason: "end_turn" }]);
+    expect(out).toEqual([{ type: "message_stop", stopReason: { kind: "end_turn", raw: "stop" } }]);
   });
 });
 
@@ -351,7 +351,7 @@ describe("translateChunk — reasoning streaming (OpenAI-compat extensions)", ()
       { type: "reasoning_delta", text: "step 1 " },
       { type: "reasoning_delta", text: "step 2" },
       { type: "text_delta", text: "done" },
-      { type: "message_stop", stopReason: "end_turn" },
+      { type: "message_stop", stopReason: { kind: "end_turn", raw: "stop" } },
     ]);
   });
 
@@ -359,7 +359,7 @@ describe("translateChunk — reasoning streaming (OpenAI-compat extensions)", ()
     const out = run([{ choices: [{ index: 0, delta: { reasoning: "thinking" }, finish_reason: "stop" }] }]);
     expect(out).toEqual([
       { type: "reasoning_delta", text: "thinking" },
-      { type: "message_stop", stopReason: "end_turn" },
+      { type: "message_stop", stopReason: { kind: "end_turn", raw: "stop" } },
     ]);
   });
 
@@ -368,7 +368,7 @@ describe("translateChunk — reasoning streaming (OpenAI-compat extensions)", ()
     expect(out.some((e) => e.type === "reasoning_delta")).toBe(false);
     expect(out).toEqual([
       { type: "text_delta", text: "hi" },
-      { type: "message_stop", stopReason: "end_turn" },
+      { type: "message_stop", stopReason: { kind: "end_turn", raw: "stop" } },
     ]);
   });
 });
@@ -410,7 +410,7 @@ describe("translateChunk — single tool call", () => {
     const flushed = acc.flush();
     expect(flushed).toEqual([
       { type: "tool_use", id: "call_1", name: "read", input: { path: "x" } },
-      { type: "message_stop", stopReason: "tool_use" },
+      { type: "message_stop", stopReason: { kind: "tool_use", raw: "tool_calls" } },
     ]);
     expect(asToolUse(flushed[0]).inputParseError).toBeUndefined();
   });
@@ -458,7 +458,7 @@ describe("translateChunk — multiple concurrent tool calls", () => {
     expect(out).toEqual([
       { type: "tool_use", id: "call_a", name: "read", input: { path: "a.txt" } },
       { type: "tool_use", id: "call_b", name: "write", input: { file: "b.txt" } },
-      { type: "message_stop", stopReason: "tool_use" },
+      { type: "message_stop", stopReason: { kind: "tool_use", raw: "tool_calls" } },
     ]);
   });
 
@@ -618,29 +618,60 @@ describe("translateChunk — no-arg / empty arguments", () => {
 });
 
 describe("translateChunk — finish_reason mapping", () => {
-  it("maps 'tool_calls' → 'tool_use'", () => {
-    const out = run([{ choices: [{ index: 0, delta: {}, finish_reason: "tool_calls" }] }]);
-    expect(out).toEqual([{ type: "message_stop", stopReason: "tool_use" }]);
+  it.each([
+    ["stop", { kind: "end_turn", raw: "stop" }],
+    ["tool_calls", { kind: "tool_use", raw: "tool_calls" }],
+    ["length", { kind: "max_tokens", raw: "length" }],
+    ["content_filter", { kind: "content_filter", raw: "content_filter" }],
+    ["function_call", { kind: "tool_use", raw: "function_call" }],
+    ["future_reason", { kind: "other", raw: "future_reason" }],
+  ] as const)("maps OpenAI finish_reason %s exactly", (finishReason, expected) => {
+    const out = run([{ choices: [{ index: 0, delta: {}, finish_reason: finishReason }] }]);
+    expect(out).toEqual([{ type: "message_stop", stopReason: expected }]);
   });
 
-  it("maps 'stop' → 'end_turn'", () => {
-    const out = run([{ choices: [{ index: 0, delta: {}, finish_reason: "stop" }] }]);
-    expect(out).toEqual([{ type: "message_stop", stopReason: "end_turn" }]);
+  it("maps a missing finish_reason to other/null", () => {
+    expect(run([])).toEqual([
+      { type: "message_stop", stopReason: { kind: "other", raw: null } },
+    ]);
+  });
+});
+
+describe("translateChunk — refusal precedence", () => {
+  it.each([
+    ["stop", { kind: "refusal", raw: "stop" }],
+    [undefined, { kind: "refusal", raw: null }],
+    ["length", { kind: "max_tokens", raw: "length" }],
+    ["content_filter", { kind: "content_filter", raw: "content_filter" }],
+    ["tool_calls", { kind: "tool_use", raw: "tool_calls" }],
+    ["function_call", { kind: "tool_use", raw: "function_call" }],
+    ["future_reason", { kind: "other", raw: "future_reason" }],
+  ] as const)("uses non-empty refusal with finish reason %s at locked precedence", (finishReason, expected) => {
+    const chunks: unknown[] = [
+      { choices: [{ index: 0, delta: { refusal: "  policy refusal  " }, finish_reason: null }] },
+    ];
+    if (finishReason !== undefined) {
+      chunks.push({ choices: [{ index: 0, delta: {}, finish_reason: finishReason }] });
+    }
+
+    const out = run(chunks);
+    expect(out).toEqual([{ type: "message_stop", stopReason: expected }]);
+    expect(out.some((event) => event.type === "text_delta")).toBe(false);
   });
 
-  it("maps 'length' → 'max_tokens'", () => {
-    const out = run([{ choices: [{ index: 0, delta: {}, finish_reason: "length" }] }]);
-    expect(out).toEqual([{ type: "message_stop", stopReason: "max_tokens" }]);
-  });
-
-  it("passes 'content_filter' through unchanged", () => {
-    const out = run([{ choices: [{ index: 0, delta: {}, finish_reason: "content_filter" }] }]);
-    expect(out).toEqual([{ type: "message_stop", stopReason: "content_filter" }]);
+  it.each(["", "   "])("does not infer refusal from an empty fragment %j", (refusal) => {
+    const out = run([
+      { choices: [{ index: 0, delta: { refusal }, finish_reason: null }] },
+      { choices: [{ index: 0, delta: {}, finish_reason: "stop" }] },
+    ]);
+    expect(out).toEqual([
+      { type: "message_stop", stopReason: { kind: "end_turn", raw: "stop" } },
+    ]);
   });
 });
 
 describe("translateChunk — no finish_reason (abort/disconnect)", () => {
-  it("still flushes the accumulated tool_use plus one message_stop defaulting to 'end_turn'", () => {
+  it("still flushes the accumulated tool_use plus one message_stop with other/null", () => {
     const chunks = [
       {
         choices: [
@@ -661,7 +692,7 @@ describe("translateChunk — no finish_reason (abort/disconnect)", () => {
     const out = run(chunks);
     expect(out).toEqual([
       { type: "tool_use", id: "call_1", name: "read", input: { path: "x" } },
-      { type: "message_stop", stopReason: "end_turn" },
+      { type: "message_stop", stopReason: { kind: "other", raw: null } },
     ]);
   });
 });
@@ -712,7 +743,7 @@ describe("translateChunk — exactly one message_stop across a long mixed stream
     // After the usage-capture restructure, flush() includes usage from the usageChunk.
     expect(out[out.length - 1]).toEqual({
       type: "message_stop",
-      stopReason: "tool_use",
+      stopReason: { kind: "tool_use", raw: "tool_calls" },
       usage: { inputTokens: 10, outputTokens: 5, cacheReadTokens: 0 },
     });
   });
@@ -721,13 +752,13 @@ describe("translateChunk — exactly one message_stop across a long mixed stream
 describe("translateChunk — empty turn", () => {
   it("yields no events during the stream and exactly one message_stop with no tool_use", () => {
     const out = run([{ choices: [{ index: 0, delta: {}, finish_reason: "stop" }] }]);
-    expect(out).toEqual([{ type: "message_stop", stopReason: "end_turn" }]);
+    expect(out).toEqual([{ type: "message_stop", stopReason: { kind: "end_turn", raw: "stop" } }]);
     expect(out.some((e) => e.type === "tool_use")).toBe(false);
   });
 
-  it("an entirely empty stream still flushes exactly one message_stop (default end_turn)", () => {
+  it("an entirely empty stream still flushes exactly one message_stop with other/null", () => {
     const out = run([]);
-    expect(out).toEqual([{ type: "message_stop", stopReason: "end_turn" }]);
+    expect(out).toEqual([{ type: "message_stop", stopReason: { kind: "other", raw: null } }]);
   });
 });
 

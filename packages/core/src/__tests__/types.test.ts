@@ -12,6 +12,7 @@ import type {
 } from "../types/messages.js";
 import type { AgentEvent, Terminal, SubagentChildEvent } from "../types/events.js";
 import type { ProviderEvent, ProviderRequest, ToolSchema } from "../types/provider.js";
+import type { StopReason, StopReasonKind } from "../index.js";
 import { EMPTY_USAGE } from "../types/usage.js";
 import type { Usage } from "../types/usage.js";
 import { bashTool } from "../tools/builtin/bash.js";
@@ -92,6 +93,102 @@ describe("type export surface (compile-time literal construction)", () => {
     expect(providerToolUse.inputParseError).toBe(true);
     expect(terminal.reason).toBe("agent_done");
     expect(request.messages).toHaveLength(1);
+  });
+});
+
+describe("stop-reason public type surface (SR-12 provider half)", () => {
+  it("constructs all nine kinds exported from the main entry and narrows exhaustively", () => {
+    const reasons: StopReason[] = [
+      { kind: "end_turn", raw: "end_turn" },
+      { kind: "tool_use", raw: "tool_calls" },
+      { kind: "max_tokens", raw: "length" },
+      { kind: "stop_sequence", raw: "stop_sequence" },
+      { kind: "pause_turn", raw: "pause_turn" },
+      { kind: "refusal", raw: null },
+      { kind: "content_filter", raw: "content_filter" },
+      { kind: "model_context_window_exceeded", raw: "model_context_window_exceeded" },
+      { kind: "other", raw: "future_reason" },
+    ];
+    const kinds: StopReasonKind[] = reasons.map((reason) => reason.kind);
+
+    function assertNever(value: never): never {
+      throw new Error(String(value));
+    }
+    function narrow(reason: StopReason): StopReasonKind {
+      switch (reason.kind) {
+        case "end_turn":
+        case "tool_use":
+        case "max_tokens":
+        case "stop_sequence":
+        case "pause_turn":
+        case "refusal":
+        case "content_filter":
+        case "model_context_window_exceeded":
+        case "other":
+          return reason.kind;
+        default:
+          return assertNever(reason);
+      }
+    }
+
+    expect(reasons.map(narrow)).toEqual(kinds);
+    expect(kinds).toEqual([
+      "end_turn",
+      "tool_use",
+      "max_tokens",
+      "stop_sequence",
+      "pause_turn",
+      "refusal",
+      "content_filter",
+      "model_context_window_exceeded",
+      "other",
+    ]);
+  });
+
+  it("requires stopReason on message_stop and raw on every StopReason arm", () => {
+    const valid: ProviderEvent = {
+      type: "message_stop",
+      stopReason: { kind: "other", raw: null },
+    };
+
+    // @ts-expect-error message_stop requires a structured stopReason.
+    const _missingReason: ProviderEvent = { type: "message_stop" };
+    // @ts-expect-error string stop reasons are no longer accepted.
+    const _legacyReason: ProviderEvent = { type: "message_stop", stopReason: "end_turn" };
+    // @ts-expect-error raw is required on the end_turn arm.
+    const _missingEndTurnRaw: StopReason = { kind: "end_turn" };
+    // @ts-expect-error raw is required on the tool_use arm.
+    const _missingToolUseRaw: StopReason = { kind: "tool_use" };
+    // @ts-expect-error raw is required on the max_tokens arm.
+    const _missingMaxTokensRaw: StopReason = { kind: "max_tokens" };
+    // @ts-expect-error raw is required on the stop_sequence arm.
+    const _missingStopSequenceRaw: StopReason = { kind: "stop_sequence" };
+    // @ts-expect-error raw is required on the pause_turn arm.
+    const _missingPauseTurnRaw: StopReason = { kind: "pause_turn" };
+    // @ts-expect-error raw is required on the refusal arm.
+    const _missingRefusalRaw: StopReason = { kind: "refusal" };
+    // @ts-expect-error raw is required on the content_filter arm.
+    const _missingContentFilterRaw: StopReason = { kind: "content_filter" };
+    // @ts-expect-error raw is required on the model_context_window_exceeded arm.
+    const _missingContextWindowRaw: StopReason = { kind: "model_context_window_exceeded" };
+    // @ts-expect-error raw is required on the other arm.
+    const _missingOtherRaw: StopReason = { kind: "other" };
+    // @ts-expect-error kinds are closed; future provider strings use other/raw.
+    const _openKind: StopReason = { kind: "future_reason", raw: "future_reason" };
+    void _missingReason;
+    void _legacyReason;
+    void _missingEndTurnRaw;
+    void _missingToolUseRaw;
+    void _missingMaxTokensRaw;
+    void _missingStopSequenceRaw;
+    void _missingPauseTurnRaw;
+    void _missingRefusalRaw;
+    void _missingContentFilterRaw;
+    void _missingContextWindowRaw;
+    void _missingOtherRaw;
+    void _openKind;
+
+    expect(valid.stopReason).toEqual({ kind: "other", raw: null });
   });
 });
 

@@ -113,7 +113,7 @@ describe("Agent.run", () => {
     const provider = new MockProvider([
       [
         { type: "text_delta", text: "hello" },
-        { type: "message_stop", stopReason: "end_turn" },
+        { type: "message_stop", stopReason: { kind: "end_turn", raw: "end_turn" } },
       ],
     ]);
     const agent = new Agent({ provider, tools: [], platform: new MockPlatform() });
@@ -154,7 +154,7 @@ describe("Agent.run", () => {
     const provider1 = new MockProvider([
       [
         { type: "text_delta", text: "the capital is Paris" },
-        { type: "message_stop", stopReason: "end_turn" },
+        { type: "message_stop", stopReason: { kind: "end_turn", raw: "end_turn" } },
       ],
     ]);
     const agent1 = new Agent({ provider: provider1, tools: [], platform: new MockPlatform() });
@@ -171,7 +171,7 @@ describe("Agent.run", () => {
     const provider2 = new MockProvider([
       [
         { type: "text_delta", text: "It has ~2.1M residents." },
-        { type: "message_stop", stopReason: "end_turn" },
+        { type: "message_stop", stopReason: { kind: "end_turn", raw: "end_turn" } },
       ],
     ]);
     const agent2 = new Agent({ provider: provider2, tools: [], platform: new MockPlatform() });
@@ -205,7 +205,7 @@ describe("Agent.run", () => {
 
   it("injects the env context block into the system prompt (7.13)", async () => {
     const provider = new MockProvider([
-      [{ type: "message_stop", stopReason: "end_turn" }],
+      [{ type: "message_stop", stopReason: { kind: "end_turn", raw: "end_turn" } }],
     ]);
     const agent = new Agent({
       provider,
@@ -223,7 +223,7 @@ describe("Agent.run", () => {
 
   it("appends a custom systemPrompt after the env block (7.13)", async () => {
     const provider = new MockProvider([
-      [{ type: "message_stop", stopReason: "end_turn" }],
+      [{ type: "message_stop", stopReason: { kind: "end_turn", raw: "end_turn" } }],
     ]);
     const agent = new Agent({
       provider,
@@ -269,11 +269,11 @@ describe("Agent.run", () => {
     const provider = new MockProvider([
       [
         { type: "tool_use", id: "t1", name: "read_file", input: { path: "/some/file.txt" } },
-        { type: "message_stop", stopReason: "tool_use" },
+        { type: "message_stop", stopReason: { kind: "tool_use", raw: "tool_use" } },
       ],
       [
         { type: "text_delta", text: "read it" },
-        { type: "message_stop", stopReason: "end_turn" },
+        { type: "message_stop", stopReason: { kind: "end_turn", raw: "end_turn" } },
       ],
     ]);
     const agent = new Agent({
@@ -318,11 +318,11 @@ describe("Agent.run", () => {
     const provider = new MockProvider([
       [
         { type: "tool_use", id: "b1", name: "bad_tool", input: {} },
-        { type: "message_stop", stopReason: "tool_use" },
+        { type: "message_stop", stopReason: { kind: "tool_use", raw: "tool_use" } },
       ],
       [
         { type: "text_delta", text: "recovered" },
-        { type: "message_stop", stopReason: "end_turn" },
+        { type: "message_stop", stopReason: { kind: "end_turn", raw: "end_turn" } },
       ],
     ]);
     const agent = new Agent({ provider, tools: [badTool], platform: new MockPlatform() });
@@ -364,7 +364,7 @@ describe("Agent.run — AbortSignal", () => {
     const provider = new MockProvider([
       [
         { type: "text_delta", text: "should not be reached" },
-        { type: "message_stop", stopReason: "end_turn" },
+        { type: "message_stop", stopReason: { kind: "end_turn", raw: "end_turn" } },
       ],
     ]);
     const agent = new Agent({ provider, tools: [], platform: new MockPlatform() });
@@ -443,7 +443,7 @@ describe("Agent.run — AbortSignal", () => {
     const provider = new MockProvider([
       [
         { type: "text_delta", text: "hello" },
-        { type: "message_stop", stopReason: "end_turn" },
+        { type: "message_stop", stopReason: { kind: "end_turn", raw: "end_turn" } },
       ],
     ]);
     const agent = new Agent({ provider, tools: [], platform: new MockPlatform() });
@@ -466,7 +466,7 @@ describe("Agent.run — AbortSignal", () => {
     const provider = new MockProvider([
       [
         { type: "text_delta", text: "hi" },
-        { type: "message_stop", stopReason: "end_turn" },
+        { type: "message_stop", stopReason: { kind: "end_turn", raw: "end_turn" } },
       ],
     ]);
     const agent = new Agent({ provider, tools: [], platform: new MockPlatform() });

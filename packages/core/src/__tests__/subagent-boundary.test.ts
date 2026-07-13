@@ -99,7 +99,7 @@ function makeLeakyChild(): Agent {
       { type: "tool_use", id: "child_tool_1", name: "leaky_child_tool", input: {} },
       {
         type: "message_stop",
-        stopReason: "tool_use",
+        stopReason: { kind: "tool_use", raw: "tool_use" },
         usage: { inputTokens: 8, outputTokens: 4, cacheReadTokens: 0 },
       },
     ],
@@ -107,7 +107,7 @@ function makeLeakyChild(): Agent {
       { type: "text_delta", text: "child final answer" },
       {
         type: "message_stop",
-        stopReason: "end_turn",
+        stopReason: { kind: "end_turn", raw: "end_turn" },
         usage: { inputTokens: 2, outputTokens: 1, cacheReadTokens: 0 },
       },
     ],
@@ -131,7 +131,7 @@ function runParentWithLeakyChild(): Promise<{ events: AgentEvent[]; terminal: Te
       { type: "tool_use", id: "task1", name: "task", input: { description: "d", prompt: "sub" } },
       {
         type: "message_stop",
-        stopReason: "tool_use",
+        stopReason: { kind: "tool_use", raw: "tool_use" },
         usage: { inputTokens: 100, outputTokens: 50, cacheReadTokens: 0 },
       },
     ],
@@ -139,7 +139,7 @@ function runParentWithLeakyChild(): Promise<{ events: AgentEvent[]; terminal: Te
       { type: "text_delta", text: "parent done" },
       {
         type: "message_stop",
-        stopReason: "end_turn",
+        stopReason: { kind: "end_turn", raw: "end_turn" },
         usage: { inputTokens: 1, outputTokens: 1, cacheReadTokens: 0 },
       },
     ],

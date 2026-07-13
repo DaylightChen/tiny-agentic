@@ -1,6 +1,6 @@
 import type Anthropic from "@anthropic-ai/sdk";
 import type { Message } from "../types/messages.js";
-import type { ProviderEvent, ProviderRequest, ToolSchema } from "../types/provider.js";
+import type { ProviderEvent, ProviderRequest, StopReason, ToolSchema } from "../types/provider.js";
 import { type Usage, mergeUsage, EMPTY_USAGE } from "../types/usage.js";
 
 // Malformed streamed tool input (§6.1) is signalled provider-agnostically by the
@@ -66,9 +66,9 @@ export class InputAccumulator {
     this.stopReason = reason;
   }
 
-  /** Return the cached stop_reason at message_stop, defaulting to "end_turn". */
-  takeStopReason(): string {
-    return this.stopReason ?? "end_turn";
+  /** Return the normalized cached stop_reason at message_stop. */
+  takeStopReason(): StopReason {
+    return normalizeStopReason(this.stopReason);
   }
 
   /** Initialize usage from message_start fields. Overwrites any prior usage for this turn. */
@@ -122,6 +122,23 @@ export class InputAccumulator {
     } catch {
       return { kind: "parse_error", id: block.id, name: block.name };
     }
+  }
+}
+
+function normalizeStopReason(reason: string | undefined): StopReason {
+  switch (reason) {
+    case "end_turn":
+    case "tool_use":
+    case "max_tokens":
+    case "stop_sequence":
+    case "pause_turn":
+    case "refusal":
+    case "model_context_window_exceeded":
+      return { kind: reason, raw: reason };
+    case undefined:
+      return { kind: "other", raw: null };
+    default:
+      return { kind: "other", raw: reason };
   }
 }
 

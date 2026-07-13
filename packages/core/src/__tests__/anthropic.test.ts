@@ -6,19 +6,21 @@ import type { ProviderEvent } from "../types/provider.js";
 // completion. vi.mock is hoisted above the imports below, so the top-level
 // `import { AnthropicProvider }` picks up this stub.
 const streamSpy = vi.fn();
+let streamImpl: () => AsyncGenerator<unknown>;
+
+async function* defaultStream(): AsyncGenerator<unknown> {
+  yield { type: "message_start", message: {} };
+  yield { type: "message_delta", delta: { stop_reason: "end_turn" } };
+  yield { type: "message_stop" };
+}
 
 vi.mock("@anthropic-ai/sdk", () => {
-  async function* fakeStream() {
-    yield { type: "message_start", message: {} };
-    yield { type: "message_delta", delta: { stop_reason: "end_turn" } };
-    yield { type: "message_stop" };
-  }
   return {
     default: class {
       messages = {
         stream: (...args: unknown[]) => {
           streamSpy(...args);
-          return fakeStream();
+          return streamImpl();
         },
       };
     },
@@ -38,6 +40,7 @@ async function drain(gen: AsyncGenerator<ProviderEvent>): Promise<ProviderEvent[
 describe("AnthropicProvider", () => {
   beforeEach(() => {
     streamSpy.mockClear();
+    streamImpl = defaultStream;
   });
 
   afterEach(() => {
@@ -54,13 +57,27 @@ describe("AnthropicProvider", () => {
       provider.stream({ systemPrompt: "", messages: [], tools: [] }),
     );
 
-    // Stream ran to completion (sanity: message_stop translated through).
-    expect(events.some((e) => e.type === "message_stop")).toBe(true);
+    // Stream ran to completion and the provider boundary emitted a structured reason.
+    expect(events).toEqual([
+      { type: "message_stop", stopReason: { kind: "end_turn", raw: "end_turn" } },
+    ]);
 
     // The real 7.14 check: nothing is emitted to the console without a logger.
     expect(logSpy).not.toHaveBeenCalled();
     expect(errorSpy).not.toHaveBeenCalled();
     expect(warnSpy).not.toHaveBeenCalled();
+  });
+
+  it("preserves an unknown native reason through the provider integration", async () => {
+    streamImpl = async function* () {
+      yield { type: "message_delta", delta: { stop_reason: "future_reason" } };
+      yield { type: "message_stop" };
+    };
+
+    const provider = new AnthropicProvider({ apiKey: "k", model: "m" });
+    await expect(drain(provider.stream({ systemPrompt: "", messages: [], tools: [] }))).resolves.toEqual([
+      { type: "message_stop", stopReason: { kind: "other", raw: "future_reason" } },
+    ]);
   });
 
   it("fires the logger with request_sent when a logger is provided", async () => {
