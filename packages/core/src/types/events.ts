@@ -1,4 +1,5 @@
 import type { Message } from "./messages.js";
+import type { StopReason } from "./provider.js";
 import type { Usage } from "./usage.js";
 
 /**
@@ -15,7 +16,9 @@ export type SubagentChildEvent =
   | { type: "reasoning_delta"; text: string }
   | { type: "tool_use_start"; toolName: string; toolInput: unknown }
   | { type: "tool_result";    toolName: string; toolCallId: string; isError: boolean }
-  | { type: "terminal";       reason: "agent_done" | "max_turns_exceeded" | "agent_error"; usage: Usage; errorMessage?: string };
+  | { type: "terminal"; reason: "agent_done"; usage: Usage; stopReason: StopReason }
+  | { type: "terminal"; reason: "max_turns_exceeded"; usage: Usage }
+  | { type: "terminal"; reason: "agent_error"; usage: Usage; errorMessage?: string };
 
 /**
  * All events yielded by Agent.run().
@@ -35,7 +38,7 @@ export type AgentEvent =
   | { type: "reasoning_delta";    text: string }
   | { type: "tool_use_start";     toolName: string; toolInput: unknown }
   | { type: "tool_result";        toolName: string; toolCallId: string; result: unknown; isError: boolean }
-  | { type: "turn_complete";      turnIndex: number; usage?: Usage }
+  | { type: "turn_complete";      turnIndex: number; stopReason: StopReason; usage?: Usage }
   // Sanitized sub-agent lifecycle event, tagged with the spawning `task` call's
   // tool-use id (`taskId`, sourced from `context.toolCallId` at runtime). Not
   // recursive: the wrapped payload is a `SubagentChildEvent`, which has no
@@ -45,7 +48,7 @@ export type AgentEvent =
   // Terminal events — the generator exhausts after yielding one of these.
   // Each carries `messages` so a `for await` consumer can thread history
   // without capturing the generator's return value.
-  | { type: "agent_done";         messages: Message[]; usage: Usage }
+  | { type: "agent_done";         messages: Message[]; usage: Usage; stopReason: StopReason }
   | { type: "max_turns_exceeded"; turnsUsed: number; messages: Message[]; usage: Usage }
   | { type: "agent_error";        error: Error; messages: Message[]; usage: Usage };
 
@@ -55,6 +58,6 @@ export type AgentEvent =
  * For `.next()` consumers: read the generator's done.value.
  */
 export type Terminal =
-  | { reason: "agent_done";         messages: Message[]; usage: Usage }
+  | { reason: "agent_done";         messages: Message[]; usage: Usage; stopReason: StopReason }
   | { reason: "max_turns_exceeded"; messages: Message[]; turnsUsed: number; usage: Usage }
   | { reason: "agent_error";        messages: Message[]; error: Error; usage: Usage };

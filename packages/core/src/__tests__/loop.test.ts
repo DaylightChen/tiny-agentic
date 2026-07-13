@@ -117,6 +117,68 @@ describe("agentLoop", () => {
     expect(terminal.reason).toBe("agent_done");
   });
 
+  it("propagates the identical final StopReason object to turn_complete, agent_done, and Terminal (SR-5)", async () => {
+    const stopReason = { kind: "end_turn", raw: "end_turn" } as const;
+    const provider = new MockProvider([
+      [
+        { type: "text_delta", text: "final" },
+        { type: "message_stop", stopReason },
+      ],
+    ]);
+
+    const { events, terminal } = await collectEvents(
+      agentLoop(makeParams(provider, new ToolRegistry([]))),
+    );
+    const turnComplete = events.find((event) => event.type === "turn_complete");
+    const done = events.find((event) => event.type === "agent_done");
+    if (turnComplete?.type !== "turn_complete" || done?.type !== "agent_done") {
+      throw new Error("expected completion events");
+    }
+    if (terminal.reason !== "agent_done") throw new Error("expected successful terminal");
+
+    expect(turnComplete.stopReason).toEqual(stopReason);
+    expect(done.stopReason).toEqual(stopReason);
+    expect(terminal.stopReason).toEqual(stopReason);
+    expect(turnComplete.stopReason).toBe(stopReason);
+    expect(done.stopReason).toBe(stopReason);
+    expect(terminal.stopReason).toBe(stopReason);
+  });
+
+  it.each([
+    ["max_tokens", "max_tokens"],
+    ["model_context_window_exceeded", "model_context_window_exceeded"],
+    ["content_filter", "content_filter"],
+    ["refusal", "refusal"],
+    ["other", "vendor_future_stop"],
+  ] as const)("treats %s as a valid partial completion with text and usage (SR-6)", async (kind, raw) => {
+    const stopReason = { kind, raw };
+    const usage = { inputTokens: 11, outputTokens: 7, cacheReadTokens: 2 };
+    const provider = new MockProvider([
+      [
+        { type: "text_delta", text: "partial output" },
+        { type: "message_stop", stopReason, usage },
+      ],
+    ]);
+
+    const { events, terminal } = await collectEvents(
+      agentLoop(makeParams(provider, new ToolRegistry([]))),
+    );
+
+    expect(events.some((event) => event.type === "agent_error")).toBe(false);
+    expect(events).toContainEqual({ type: "text_delta", text: "partial output" });
+    const done = events.find((event) => event.type === "agent_done");
+    if (done?.type !== "agent_done" || terminal.reason !== "agent_done") {
+      throw new Error("expected valid successful completion");
+    }
+    expect(done.stopReason).toBe(stopReason);
+    expect(terminal.stopReason).toBe(stopReason);
+    expect(terminal.usage).toEqual(usage);
+    expect(terminal.messages.at(-1)).toEqual({
+      role: "assistant",
+      content: [{ type: "text", text: "partial output" }],
+    });
+  });
+
   it("forwards reasoning_delta to the caller but keeps it out of assistant history", async () => {
     const provider = new MockProvider([
       [
@@ -183,6 +245,80 @@ describe("agentLoop", () => {
     expect(terminal.reason).toBe("agent_done");
   });
 
+  it("records tool-use turn reason and uses the second turn's reason as final (SR-7)", async () => {
+    const firstReason = { kind: "tool_use", raw: "tool_calls" } as const;
+    const finalReason = { kind: "stop_sequence", raw: "stop_sequence" } as const;
+    const provider = new MockProvider([
+      [
+        { type: "tool_use", id: "t1", name: "ok_tool", input: {} },
+        { type: "message_stop", stopReason: firstReason },
+      ],
+      [
+        { type: "text_delta", text: "done" },
+        { type: "message_stop", stopReason: finalReason },
+      ],
+    ]);
+
+    const { events, terminal } = await collectEvents(
+      agentLoop(makeParams(provider, new ToolRegistry([okTool]))),
+    );
+    const turns = events.filter((event): event is Extract<AgentEvent, { type: "turn_complete" }> => event.type === "turn_complete");
+    expect(turns.map((turn) => turn.stopReason)).toEqual([firstReason, finalReason]);
+    expect(turns[0]?.stopReason).toBe(firstReason);
+    expect(turns[1]?.stopReason).toBe(finalReason);
+    if (terminal.reason !== "agent_done") throw new Error("expected successful terminal");
+    expect(terminal.stopReason).toBe(finalReason);
+    expect(provider.requests).toHaveLength(2);
+  });
+
+  it("executes buffered tools even when stopReason is end_turn (SR-8)", async () => {
+    const inconsistent = { kind: "end_turn", raw: "end_turn" } as const;
+    const finalReason = { kind: "end_turn", raw: "end_turn" } as const;
+    const provider = new MockProvider([
+      [
+        { type: "tool_use", id: "t1", name: "ok_tool", input: {} },
+        { type: "message_stop", stopReason: inconsistent },
+      ],
+      [{ type: "message_stop", stopReason: finalReason }],
+    ]);
+
+    const { events, terminal } = await collectEvents(
+      agentLoop(makeParams(provider, new ToolRegistry([okTool]))),
+    );
+    expect(events).toContainEqual(expect.objectContaining({ type: "tool_result", toolCallId: "t1" }));
+    expect(provider.requests).toHaveLength(2);
+    const firstTurn = events.find((event) => event.type === "turn_complete");
+    if (firstTurn?.type !== "turn_complete" || terminal.reason !== "agent_done") throw new Error("expected completion");
+    expect(firstTurn.stopReason).toBe(inconsistent);
+    expect(terminal.stopReason).toBe(finalReason);
+  });
+
+  it("terminates visibly when stopReason is tool_use but no tools were buffered (SR-8)", async () => {
+    const stopReason = { kind: "tool_use", raw: "tool_use" } as const;
+    const provider = new MockProvider([[{ type: "message_stop", stopReason }]]);
+
+    const { events, terminal } = await collectEvents(
+      agentLoop(makeParams(provider, new ToolRegistry([]))),
+    );
+    expect(provider.requests).toHaveLength(1);
+    expect(events.map((event) => event.type)).toEqual(["turn_complete", "agent_done"]);
+    if (terminal.reason !== "agent_done") throw new Error("expected successful terminal");
+    expect(terminal.stopReason).toBe(stopReason);
+  });
+
+  it("does not resubmit a tool-free pause_turn (SR-9)", async () => {
+    const stopReason = { kind: "pause_turn", raw: "pause_turn" } as const;
+    const provider = new MockProvider([[{ type: "message_stop", stopReason }]]);
+
+    const { events, terminal } = await collectEvents(
+      agentLoop(makeParams(provider, new ToolRegistry([]))),
+    );
+    expect(provider.requests).toHaveLength(1);
+    expect(events.some((event) => event.type === "agent_error")).toBe(false);
+    if (terminal.reason !== "agent_done") throw new Error("expected successful terminal");
+    expect(terminal.stopReason).toBe(stopReason);
+  });
+
   it("stops at maxTurns when the model keeps requesting tools (7.5)", async () => {
     // Provider always returns a tool-use turn, so the loop never completes
     // naturally — the maxTurns guard must stop it.
@@ -228,6 +364,38 @@ describe("agentLoop", () => {
     expect(terminal.error.message).toBe("network down");
   });
 
+  it("turns a missing message_stop into the exact agent_error while retaining partial text and prior usage (SR-10)", async () => {
+    const priorUsage = { inputTokens: 10, outputTokens: 5, cacheReadTokens: 1 };
+    const provider = new MockProvider([
+      [
+        { type: "tool_use", id: "t1", name: "ok_tool", input: {} },
+        {
+          type: "message_stop",
+          stopReason: { kind: "tool_use", raw: "tool_use" },
+          usage: priorUsage,
+        },
+      ],
+      [{ type: "text_delta", text: "orphaned partial" }],
+    ]);
+
+    const { events, terminal } = await collectEvents(
+      agentLoop(makeParams(provider, new ToolRegistry([okTool]))),
+    );
+    expect(events).toContainEqual({ type: "text_delta", text: "orphaned partial" });
+    const errorEvent = events.at(-1);
+    if (errorEvent?.type !== "agent_error" || terminal.reason !== "agent_error") {
+      throw new Error("expected agent_error terminal");
+    }
+    expect(errorEvent.error.message).toBe("Provider stream ended without message_stop");
+    expect(terminal.error.message).toBe("Provider stream ended without message_stop");
+    expect(errorEvent.usage).toEqual(priorUsage);
+    expect(terminal.usage).toEqual(priorUsage);
+    expect("stopReason" in errorEvent).toBe(false);
+    expect("stopReason" in terminal).toBe(false);
+    expect(errorEvent.messages).toEqual(terminal.messages);
+    expect(errorEvent.messages.some((message) => JSON.stringify(message).includes("orphaned partial"))).toBe(false);
+  });
+
   it("does not push an assistant message for an empty turn", async () => {
     const provider = new MockProvider([
       [{ type: "message_stop", stopReason: { kind: "end_turn", raw: "end_turn" } }],
@@ -237,7 +405,14 @@ describe("agentLoop", () => {
     const { events, terminal } = await collectEvents(agentLoop(params));
 
     expect(events.map((e) => e.type)).toEqual(["turn_complete", "agent_done"]);
-    expect(terminal.reason).toBe("agent_done");
+    const turnComplete = events[0];
+    const done = events[1];
+    if (turnComplete?.type !== "turn_complete" || done?.type !== "agent_done" || terminal.reason !== "agent_done") {
+      throw new Error("expected successful empty completion");
+    }
+    expect(turnComplete.stopReason).toEqual({ kind: "end_turn", raw: "end_turn" });
+    expect(done.stopReason).toEqual({ kind: "end_turn", raw: "end_turn" });
+    expect(terminal.stopReason).toEqual({ kind: "end_turn", raw: "end_turn" });
 
     // No assistant message was appended: only the seed user message remains.
     expect(terminal.messages).toEqual([{ role: "user", content: "hello" }]);
@@ -1070,6 +1245,7 @@ describe("agentLoop — subagent seams", () => {
           type: "terminal",
           reason: "agent_done",
           usage: { inputTokens: 4, outputTokens: 6, cacheReadTokens: 0 },
+          stopReason: { kind: "refusal", raw: "refusal" },
         });
         return "spawned";
       },
@@ -1096,6 +1272,7 @@ describe("agentLoop — subagent seams", () => {
       type: "terminal",
       reason: "agent_done",
       usage: { inputTokens: 4, outputTokens: 6, cacheReadTokens: 0 },
+      stopReason: { kind: "refusal", raw: "refusal" },
     });
   });
 

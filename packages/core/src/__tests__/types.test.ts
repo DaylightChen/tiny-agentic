@@ -66,8 +66,9 @@ describe("type export surface (compile-time literal construction)", () => {
     const blocks: ContentBlock[] = [text, toolUse, toolResult];
 
     const message: Message = { role: "assistant", content: blocks };
+    const stopReason: StopReason = { kind: "end_turn", raw: "end_turn" };
 
-    const agentDone: AgentEvent = { type: "agent_done", messages: [message], usage: EMPTY_USAGE };
+    const agentDone: AgentEvent = { type: "agent_done", messages: [message], usage: EMPTY_USAGE, stopReason };
 
     // tool_use ProviderEvent WITH the refined-design `inputParseError` field —
     // asserts the optional flag exists on the type (no PARSE_ERROR sentinel).
@@ -79,7 +80,7 @@ describe("type export surface (compile-time literal construction)", () => {
       inputParseError: true,
     };
 
-    const terminal: Terminal = { reason: "agent_done", messages: [message], usage: EMPTY_USAGE };
+    const terminal: Terminal = { reason: "agent_done", messages: [message], usage: EMPTY_USAGE, stopReason };
 
     const request: ProviderRequest = {
       systemPrompt: "sys",
@@ -192,6 +193,95 @@ describe("stop-reason public type surface (SR-12 provider half)", () => {
   });
 });
 
+describe("stop-reason terminal type surface (SR-12 terminal half)", () => {
+  it("requires stopReason on every successful completion surface", () => {
+    const stopReason: StopReason = { kind: "end_turn", raw: "end_turn" };
+    const turnComplete: AgentEvent = { type: "turn_complete", turnIndex: 0, stopReason };
+    const doneEvent: AgentEvent = { type: "agent_done", messages: [], usage: EMPTY_USAGE, stopReason };
+    const terminal: Terminal = { reason: "agent_done", messages: [], usage: EMPTY_USAGE, stopReason };
+    const child: SubagentChildEvent = { type: "terminal", reason: "agent_done", usage: EMPTY_USAGE, stopReason };
+
+    // @ts-expect-error turn_complete requires stopReason.
+    const _turnMissing: AgentEvent = { type: "turn_complete", turnIndex: 0 };
+    // @ts-expect-error agent_done requires stopReason.
+    const _doneMissing: AgentEvent = { type: "agent_done", messages: [], usage: EMPTY_USAGE };
+    // @ts-expect-error successful Terminal requires stopReason.
+    const _terminalMissing: Terminal = { reason: "agent_done", messages: [], usage: EMPTY_USAGE };
+    // @ts-expect-error successful child terminal requires stopReason.
+    const _childMissing: SubagentChildEvent = { type: "terminal", reason: "agent_done", usage: EMPTY_USAGE };
+    void _turnMissing;
+    void _doneMissing;
+    void _terminalMissing;
+    void _childMissing;
+
+    expect([turnComplete.type, doneEvent.type, terminal.reason, child.reason]).toEqual([
+      "turn_complete",
+      "agent_done",
+      "agent_done",
+      "agent_done",
+    ]);
+  });
+
+  it("rejects stopReason on engine error and max-turn variants", () => {
+    const error = new Error("boom");
+    const maxEvent: AgentEvent = {
+      type: "max_turns_exceeded",
+      turnsUsed: 1,
+      messages: [],
+      usage: EMPTY_USAGE,
+      // @ts-expect-error max_turns_exceeded events have no stopReason.
+      stopReason: { kind: "end_turn", raw: "end_turn" },
+    };
+    const errorEvent: AgentEvent = {
+      type: "agent_error",
+      error,
+      messages: [],
+      usage: EMPTY_USAGE,
+      // @ts-expect-error agent_error events have no stopReason.
+      stopReason: { kind: "end_turn", raw: "end_turn" },
+    };
+    const maxTerminal: Terminal = {
+      reason: "max_turns_exceeded",
+      turnsUsed: 1,
+      messages: [],
+      usage: EMPTY_USAGE,
+      // @ts-expect-error max-turn Terminals have no stopReason.
+      stopReason: { kind: "end_turn", raw: "end_turn" },
+    };
+    const errorTerminal: Terminal = {
+      reason: "agent_error",
+      error,
+      messages: [],
+      usage: EMPTY_USAGE,
+      // @ts-expect-error error Terminals have no stopReason.
+      stopReason: { kind: "end_turn", raw: "end_turn" },
+    };
+    const maxChild: SubagentChildEvent = {
+      type: "terminal",
+      reason: "max_turns_exceeded",
+      usage: EMPTY_USAGE,
+      // @ts-expect-error max-turn child terminals have no stopReason.
+      stopReason: { kind: "end_turn", raw: "end_turn" },
+    };
+    const errorChild: SubagentChildEvent = {
+      type: "terminal",
+      reason: "agent_error",
+      usage: EMPTY_USAGE,
+      // @ts-expect-error error child terminals have no stopReason.
+      stopReason: { kind: "end_turn", raw: "end_turn" },
+    };
+
+    expect([maxEvent.type, errorEvent.type, maxTerminal.reason, errorTerminal.reason, maxChild.type, errorChild.type]).toEqual([
+      "max_turns_exceeded",
+      "agent_error",
+      "max_turns_exceeded",
+      "agent_error",
+      "terminal",
+      "terminal",
+    ]);
+  });
+});
+
 describe("sub-agent type surface (compile-time boundary assertions)", () => {
   it("T18 — existing tool ignoring the new context fields still compiles", () => {
     // bashTool's `call` reads only `signal` off context; the three additive
@@ -231,7 +321,12 @@ describe("sub-agent type surface (compile-time boundary assertions)", () => {
   it("T20 — SubagentChildEvent is a closed, leak-proof union", () => {
     // A Message-bearing terminal AgentEvent must NOT be assignable to the
     // sanitized union — the boundary is type-level, not just convention.
-    const agentDone: AgentEvent = { type: "agent_done", messages: [], usage: EMPTY_USAGE };
+    const agentDone: AgentEvent = {
+      type: "agent_done",
+      messages: [],
+      usage: EMPTY_USAGE,
+      stopReason: { kind: "end_turn", raw: "end_turn" },
+    };
     // @ts-expect-error — `agent_done` carries `messages`; SubagentChildEvent has
     // no such arm, so this assignment must fail (proves the transcript can't cross).
     const _leak: SubagentChildEvent = agentDone;
@@ -243,6 +338,7 @@ describe("sub-agent type surface (compile-time boundary assertions)", () => {
       type: "terminal",
       reason: "agent_done",
       usage: EMPTY_USAGE,
+      stopReason: { kind: "end_turn", raw: "end_turn" },
     };
 
     expect(sanitized.type).toBe("terminal");
@@ -282,6 +378,7 @@ describe("sub-agent type surface (compile-time boundary assertions)", () => {
       type: "terminal",
       reason: "agent_done",
       usage: EMPTY_USAGE,
+      stopReason: { kind: "end_turn", raw: "end_turn" },
       // @ts-expect-error — `messages` is not a member of the sanitized terminal arm.
       messages: [],
     };

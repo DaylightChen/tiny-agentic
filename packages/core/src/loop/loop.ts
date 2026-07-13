@@ -1,4 +1,4 @@
-import type { Provider } from "../types/provider.js";
+import type { Provider, StopReason } from "../types/provider.js";
 import type { Platform } from "../types/platform.js";
 import type { AgentEvent, Terminal, SubagentChildEvent } from "../types/events.js";
 import type { Message, ContentBlock } from "../types/messages.js";
@@ -33,6 +33,7 @@ export async function* agentLoop(params: LoopParams): AsyncGenerator<AgentEvent,
 
   while (true) {
     let turnUsage: Usage | undefined;
+    let turnStopReason: StopReason | undefined;
 
     // Guard
     if (turnsUsed >= maxTurns) {
@@ -45,6 +46,7 @@ export async function* agentLoop(params: LoopParams): AsyncGenerator<AgentEvent,
     const textChunks: string[] = [];
     const pendingToolUses: Array<{ id: string; name: string; input: unknown; parseError: boolean }> = [];
 
+    let completedStopReason: StopReason;
     try {
       for await (const event of provider.stream(
         { systemPrompt, messages: workingMessages, tools: toolSchemas },
@@ -71,12 +73,15 @@ export async function* agentLoop(params: LoopParams): AsyncGenerator<AgentEvent,
           });
           yield { type: "tool_use_start", toolName: event.name, toolInput: event.input };
         } else if (event.type === "message_stop") {
-          if (event.usage !== undefined) {
-            turnUsage = event.usage;
-          }
+          turnStopReason = event.stopReason;
+          turnUsage = event.usage;
         }
         // message_stop is consumed but not yielded
       }
+      if (turnStopReason === undefined) {
+        throw new Error("Provider stream ended without message_stop");
+      }
+      completedStopReason = turnStopReason;
     } catch (err) {
       const error = err instanceof Error ? err : new Error(String(err));
       const event = { type: "agent_error" as const, error, messages: workingMessages, usage: cumulativeUsage };
@@ -196,15 +201,34 @@ export async function* agentLoop(params: LoopParams): AsyncGenerator<AgentEvent,
       delete context.reportUsage;
       delete context.emitEvent;
 
-      yield { type: "turn_complete", turnIndex, ...(turnUsage !== undefined ? { usage: turnUsage } : {}) };
+      yield {
+        type: "turn_complete",
+        turnIndex,
+        stopReason: completedStopReason,
+        ...(turnUsage !== undefined ? { usage: turnUsage } : {}),
+      };
       turnIndex++;
       // loop
     } else {
-      // Natural completion
-      yield { type: "turn_complete", turnIndex, ...(turnUsage !== undefined ? { usage: turnUsage } : {}) };
-      const event = { type: "agent_done" as const, messages: workingMessages, usage: cumulativeUsage };
+      yield {
+        type: "turn_complete",
+        turnIndex,
+        stopReason: completedStopReason,
+        ...(turnUsage !== undefined ? { usage: turnUsage } : {}),
+      };
+      const event = {
+        type: "agent_done" as const,
+        messages: workingMessages,
+        usage: cumulativeUsage,
+        stopReason: completedStopReason,
+      };
       yield event;
-      return { reason: "agent_done", messages: workingMessages, usage: cumulativeUsage };
+      return {
+        reason: "agent_done",
+        messages: workingMessages,
+        usage: cumulativeUsage,
+        stopReason: completedStopReason,
+      };
     }
   }
 }

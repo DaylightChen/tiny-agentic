@@ -16,7 +16,8 @@ async function* mockGen(
   return terminal;
 }
 
-const terminal: Terminal = { reason: "agent_done", messages: [], usage: EMPTY_USAGE };
+const stopReason = { kind: "end_turn", raw: "end_turn" } as const;
+const terminal: Terminal = { reason: "agent_done", messages: [], usage: EMPTY_USAGE, stopReason };
 
 describe("collectText", () => {
   it("returns the joined text from text_delta events", async () => {
@@ -35,7 +36,7 @@ describe("collectText", () => {
       { type: "tool_use_start", toolName: "read", toolInput: { path: "x" } },
       { type: "text_delta", text: "b" },
       { type: "tool_result", toolName: "read", toolCallId: "t1", result: "ok", isError: false },
-      { type: "turn_complete", turnIndex: 0 },
+      { type: "turn_complete", turnIndex: 0, stopReason },
       { type: "text_delta", text: "c" },
     ];
     const text = await collectText(mockGen(events, terminal));
@@ -45,7 +46,7 @@ describe("collectText", () => {
   it("returns empty string when there are no text_delta events", async () => {
     const events: AgentEvent[] = [
       { type: "tool_use_start", toolName: "read", toolInput: {} },
-      { type: "turn_complete", turnIndex: 0 },
+      { type: "turn_complete", turnIndex: 0, stopReason },
     ];
     const text = await collectText(mockGen(events, terminal));
     expect(text).toBe("");
@@ -62,9 +63,9 @@ describe("collectEvents", () => {
     const events: AgentEvent[] = [
       { type: "text_delta", text: "hi" },
       { type: "tool_use_start", toolName: "read", toolInput: { path: "x" } },
-      { type: "turn_complete", turnIndex: 0 },
+      { type: "turn_complete", turnIndex: 0, stopReason },
     ];
-    const term: Terminal = { reason: "agent_done", messages: [], usage: EMPTY_USAGE };
+    const term: Terminal = { reason: "agent_done", messages: [], usage: EMPTY_USAGE, stopReason };
 
     const result = await collectEvents(mockGen(events, term));
 

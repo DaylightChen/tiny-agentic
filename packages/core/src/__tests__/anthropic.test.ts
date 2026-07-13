@@ -1,5 +1,8 @@
 import { vi, describe, it, expect, beforeEach, afterEach } from "vitest";
 
+import { Agent } from "../agent.js";
+import { NodePlatform } from "../platform/node.js";
+import { collectEvents } from "../utils/collect.js";
 import type { ProviderEvent } from "../types/provider.js";
 
 // Mock the Anthropic SDK so no network is touched and the streaming path runs to
@@ -78,6 +81,23 @@ describe("AnthropicProvider", () => {
     await expect(drain(provider.stream({ systemPrompt: "", messages: [], tools: [] }))).resolves.toEqual([
       { type: "message_stop", stopReason: { kind: "other", raw: "future_reason" } },
     ]);
+  });
+
+  it("flows a provider-native unknown reason through Agent to the structured Terminal (SR-13)", async () => {
+    streamImpl = async function* () {
+      yield { type: "content_block_delta", delta: { type: "text_delta", text: "partial" } };
+      yield { type: "message_delta", delta: { stop_reason: "future_reason" } };
+      yield { type: "message_stop" };
+    };
+
+    const provider = new AnthropicProvider({ apiKey: "k", model: "m" });
+    const { events, terminal } = await collectEvents(
+      new Agent({ provider, tools: [], platform: new NodePlatform() }).run("test"),
+    );
+
+    expect(events).toContainEqual({ type: "text_delta", text: "partial" });
+    if (terminal.reason !== "agent_done") throw new Error("expected successful terminal");
+    expect(terminal.stopReason).toEqual({ kind: "other", raw: "future_reason" });
   });
 
   it("fires the logger with request_sent when a logger is provided", async () => {

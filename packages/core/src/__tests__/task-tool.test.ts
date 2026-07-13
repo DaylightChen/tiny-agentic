@@ -576,6 +576,8 @@ describe("createTaskTool — boundary invariants", () => {
     }
     if (terminalEvent.event.type !== "terminal") throw new Error("unreachable");
     expect(terminalEvent.event.reason).toBe("agent_done");
+    if (terminalEvent.event.reason !== "agent_done") throw new Error("unreachable");
+    expect(terminalEvent.event.stopReason).toEqual({ kind: "end_turn", raw: "end_turn" });
     expect(terminalEvent.event.usage).toEqual({ inputTokens: 7, outputTokens: 3, cacheReadTokens: 0 });
     // taskId correlates to the spawning call.
     expect(terminalEvent.taskId).toBe("task1");
@@ -800,6 +802,7 @@ describe("mapChildTerminalToResult", () => {
       reason: "agent_done",
       messages: [{ role: "assistant", content: "the summary" }],
       usage: EMPTY_USAGE,
+      stopReason: { kind: "end_turn", raw: "end_turn" },
     };
     expect(mapChildTerminalToResult(terminal)).toEqual({ text: "the summary", isError: false });
   });
@@ -863,13 +866,18 @@ describe("sanitizeChildEvent", () => {
     expect(out && "result" in out).toBe(false);
   });
 
-  it("maps agent_done to a terminal event carrying usage", () => {
+  it("maps agent_done to a reason-bearing terminal and strips messages", () => {
     const usage = { inputTokens: 1, outputTokens: 2, cacheReadTokens: 0 };
-    expect(sanitizeChildEvent({ type: "agent_done", messages: [], usage })).toEqual({
-      type: "terminal",
-      reason: "agent_done",
+    const stopReason = { kind: "refusal", raw: "refusal" } as const;
+    const out = sanitizeChildEvent({
+      type: "agent_done",
+      messages: [{ role: "assistant", content: "private transcript" }],
       usage,
+      stopReason,
     });
+    expect(out).toEqual({ type: "terminal", reason: "agent_done", usage, stopReason });
+    expect(out && "messages" in out).toBe(false);
+    expect(out && "result" in out).toBe(false);
   });
 
   it("maps max_turns_exceeded to a terminal event carrying usage", () => {
@@ -887,7 +895,11 @@ describe("sanitizeChildEvent", () => {
   });
 
   it("drops turn_complete (returns undefined)", () => {
-    expect(sanitizeChildEvent({ type: "turn_complete", turnIndex: 0 })).toBeUndefined();
+    expect(sanitizeChildEvent({
+      type: "turn_complete",
+      turnIndex: 0,
+      stopReason: { kind: "end_turn", raw: "end_turn" },
+    })).toBeUndefined();
   });
 
   it("drops subagent_event, preventing grandchild-event nesting (returns undefined)", () => {

@@ -249,7 +249,7 @@ describe("subagent boundary — T10-T12 (leak-proof, end-to-end)", () => {
   });
 
   // T12 — terminal reduced (data model).
-  it("T12: the child terminal subagent_event is reduced to {type, reason, usage, errorMessage?} only", async () => {
+  it("T12: successful child terminal is reduced and preserves only its structured stop reason", async () => {
     const { events } = await runParentWithLeakyChild();
 
     const terminalEvent = subagentEvents(events).find((se) => se.event.type === "terminal");
@@ -258,7 +258,7 @@ describe("subagent boundary — T10-T12 (leak-proof, end-to-end)", () => {
     if (child.type !== "terminal") throw new Error("unreachable");
 
     // Only keys within the allowed set — no `messages`, no provider-native field.
-    const allowed = new Set(["type", "reason", "usage", "errorMessage"]);
+    const allowed = new Set(["type", "reason", "usage", "stopReason"]);
     for (const key of Object.keys(child)) {
       expect(allowed.has(key)).toBe(true);
     }
@@ -267,6 +267,8 @@ describe("subagent boundary — T10-T12 (leak-proof, end-to-end)", () => {
     // reason is one of the three allowed terminal reasons.
     expect(["agent_done", "max_turns_exceeded", "agent_error"]).toContain(child.reason);
     expect(child.reason).toBe("agent_done");
+    if (child.reason !== "agent_done") throw new Error("unreachable");
+    expect(child.stopReason).toEqual({ kind: "end_turn", raw: "end_turn" });
 
     // usage is a Usage-shaped object (the three base fields present, numeric) and
     // equals the child's rolled-up usage (8/4 + 2/1 = 10/5).
