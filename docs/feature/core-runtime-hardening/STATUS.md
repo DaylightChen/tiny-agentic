@@ -5,17 +5,28 @@
 > The machine-readable source of truth is `docs/.phased-dev/scopes/feature/core-runtime-hardening.json`.
 
 ## Current Phase
-**engineering** (in progress)
+**plan** (complete — awaiting approval)
 
 ## Last Completed
 - `research` approved (2026-07-13): `docs/feature/core-runtime-hardening/research/2026-07-13-core-runtime-hardening-research.md`.
+- `engineering` approved (2026-07-13): `docs/feature/core-runtime-hardening/engineering/2026-07-13-core-runtime-hardening-engineering.md`.
+- `plan` complete (2026-07-13): `docs/feature/core-runtime-hardening/plan/implementation-plan.md` + 8 task briefs.
 
 ## What's Next
-- The `feature-architect` is producing the binding engineering spec for stop-reason semantics, the portability seam, safe batching, and release readiness.
-- Review the engineering output, then run `/phased-dev:advance-phase` to move to `plan`.
+- Review the implementation plan and task briefs.
+- Run `/phased-dev:advance-phase` to move to `implement`, then `/phased-dev:start-task 01`.
 
 ## Task Progress
-_(appears after the `plan` phase produces task briefs)_
+| # | Task | Status |
+|---|------|--------|
+| 01 | stop-reason-provider-contract | pending |
+| 02 | stop-reason-loop-propagation | pending |
+| 03 | platform-path-ordering-contract | pending |
+| 04 | portable-tools-boundary-proof | pending |
+| 05 | per-call-attribution-envelopes | pending |
+| 06 | safe-batch-scheduler | pending |
+| 07 | safe-builtins-loop-cancellation | pending |
+| 08 | docs-examples-release-readiness | pending |
 
 ## Blockers
-None
+- Final task completion requires the full verification gate on Node 22. The current local environment reports Node 20.18.1.

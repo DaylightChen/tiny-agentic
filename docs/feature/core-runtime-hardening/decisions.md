@@ -179,3 +179,39 @@
 **Rationale:** The release contains substantial additive capability and deliberate source breaks to provider/event/Platform contracts. Under SemVer major zero, a minor bump communicates this better than a patch, while `1.0.0` would overstate stability. `Unreleased` accurately separates metadata preparation from external release authorization.
 
 **Consequences:** `packages/core/package.json` moves to `0.2.0` during implementation; examples and README document the migrated type surfaces. A separate user-authorized action supplies a release date and performs publication later.
+
+---
+
+## 2026-07-13 — Split the stop-reason source break at the provider boundary
+
+**Phase:** plan
+
+**Decision:** Land structured `ProviderEvent.message_stop.stopReason`, both provider mappers, public exports, and direct provider fixtures in task 01 while leaving `AgentEvent`/`Terminal` unchanged. Then land all required turn/terminal/Task fields, loop propagation, and downstream literals atomically in task 02.
+
+**Rationale:** Putting the complete provider-to-terminal break in one task would exceed a reviewable session, while making required downstream fields optional or leaving consumers broken between commits would violate the binding contract and sequential planning rules. The current loop ignores the provider reason value, so changing the provider field from string to object is a real compile-safe seam.
+
+**Consequences:** Every task boundary compiles. Task 01 proves native normalization independently; task 02 owns the complete required terminal migration and may not weaken any field to optional.
+
+---
+
+## 2026-07-13 — Land attribution envelopes before enabling overlap
+
+**Phase:** plan
+
+**Decision:** Use a dedicated task to replace batch-wide mutable tool attribution with per-call contexts and `ToolExecution` envelopes while tool execution is still sequential. Enable safe batching only in the following task.
+
+**Rationale:** Combining attribution refactoring with the scheduler would make ID/event/usage leakage difficult to isolate and could briefly enable overlap over shared sinks. A sequential envelope commit is independently testable and gives the scheduler a committed, leak-proof foundation.
+
+**Consequences:** The `runTools` yield-shape change and `loop.ts` consumer change land atomically in task 05; task 06 adds overlap without redesigning attribution.
+
+---
+
+## 2026-07-13 — Prove portability against the built main-entry graph
+
+**Phase:** plan
+
+**Decision:** Add an automated post-build test that starts at `packages/core/dist/index.js`, recursively follows relative static imports/exports into emitted chunks, and rejects Node builtin or process access anywhere reachable. The separate `dist/platform/node.js` entry remains allowed to contain Node imports.
+
+**Rationale:** The current tsup build emits shared chunks, so scanning only source or only the text of `dist/index.js` can miss a reachable Node edge. A graph-aware built-output check directly tests the package promise without requiring a new runtime dependency.
+
+**Consequences:** Portability verification runs after `pnpm build` in tasks 04, 07, and the Node 22 final gate. The test must not treat the Node platform subpath as part of the main-entry graph unless it becomes statically reachable, in which case it correctly fails.
