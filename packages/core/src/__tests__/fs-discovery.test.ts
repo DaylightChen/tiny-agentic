@@ -1,5 +1,4 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
-import { join } from "node:path";
 
 import { NodePlatform } from "../platform/node.js";
 
@@ -15,6 +14,10 @@ import { NodePlatform } from "../platform/node.js";
  * Vitest sets NODE_ENV="test", so fs-discovery sorts name-asc deterministically.
  */
 const platform = new NodePlatform();
+
+function join(base: string, ...parts: string[]): string {
+  return [base.replace(/\/$/, ""), ...parts].join("/");
+}
 
 async function makeTempDir(): Promise<string> {
   const { stdout, exitCode } = await platform.exec("mktemp -d", { shell: true });

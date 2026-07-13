@@ -1,5 +1,4 @@
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
-import { join, relative, isAbsolute } from "node:path";
 
 import { NodePlatform } from "../platform/node.js";
 import { grepTool } from "../tools/builtin/grep.js";
@@ -15,12 +14,16 @@ import type { ToolCallContext } from "../types/tool.js";
  * signature; context carries `signal`. Vitest sets NODE_ENV="test" so ordering
  * is name-asc / deterministic.
  *
- * Returned file paths are relativized against platform.cwd() (the process cwd);
- * temp fixtures live outside cwd so their returned paths are absolute. One case
- * places a fixture UNDER cwd to exercise the cwd-relative branch.
+ * Returned file paths are formatted by the Platform. With NodePlatform, temp
+ * fixtures outside platform.cwd() stay absolute. One case places a fixture under
+ * that cwd to exercise NodePlatform's relative formatting branch.
  */
 const platform = new NodePlatform();
 const ctx: ToolCallContext = {};
+
+function join(base: string, ...parts: string[]): string {
+  return [base.replace(/\/$/, ""), ...parts].join("/");
+}
 
 // --- result type shapes (mirror §6 discriminated union) ---
 type FilesResult = { mode: "files_with_matches"; files: string[]; truncated: boolean };
@@ -130,8 +133,8 @@ describe("grep tool — three output modes", () => {
       )) as ContentResult;
       expect(res.matches).toHaveLength(1);
       const f = res.matches[0]!.file;
-      expect(isAbsolute(f)).toBe(false);
-      expect(f).toBe(relative(platform.cwd(), join(under, "hit.txt")));
+      expect(f).not.toBe(platform.resolvePath(f));
+      expect(f).toBe(platform.formatPath(join(under, "hit.txt")));
     } finally {
       await removeDir(under);
     }

@@ -1,5 +1,4 @@
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
-import { join } from "node:path";
 
 import { NodePlatform } from "../platform/node.js";
 import { lsTool } from "../tools/builtin/ls.js";
@@ -16,6 +15,10 @@ import type { DirEntry } from "../types/platform.js";
  */
 const platform = new NodePlatform();
 const ctx: ToolCallContext = {};
+
+function join(base: string, ...parts: string[]): string {
+  return [base.replace(/\/$/, ""), ...parts].join("/");
+}
 
 async function makeTempDir(): Promise<string> {
   const { stdout, exitCode } = await platform.exec("mktemp -d", { shell: true });

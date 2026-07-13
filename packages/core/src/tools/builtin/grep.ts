@@ -1,7 +1,6 @@
 import { z } from "zod";
 import { defineTool } from "../../types/tool.js";
 import type { GrepMatch, GrepOptions } from "../../types/platform.js";
-import { toReturnPath } from "./_paths.js";
 
 const DEFAULT_LIMIT = 250;
 const MAX_LINE_LENGTH = 500;
@@ -75,18 +74,17 @@ export const grepTool = defineTool({
       maxLineLength: MAX_LINE_LENGTH,
       before,
       after,
-      ...(path !== undefined ? { path } : {}),
+      ...(path !== undefined ? { path: platform.resolvePath(path) } : {}),
       ...(glob !== undefined ? { glob } : {}),
       ...(context.signal !== undefined ? { signal: context.signal } : {}),
     };
 
     const result = await platform.grep(pattern, flags, options);
-    const cwd = platform.cwd();
 
     if (mode === "files_with_matches") {
       return {
         mode: "files_with_matches" as const,
-        files: result.files.map((f) => toReturnPath(f, cwd)),
+        files: result.files.map((file) => platform.formatPath(file)),
         truncated: result.truncated,
       };
     }
@@ -95,7 +93,7 @@ export const grepTool = defineTool({
       return {
         mode: "count" as const,
         count: result.files.length,
-        files: result.files.map((f) => toReturnPath(f, cwd)),
+        files: result.files.map((file) => platform.formatPath(file)),
         truncated: result.truncated,
       };
     }
@@ -109,7 +107,7 @@ export const grepTool = defineTool({
     for (let i = 0; i < raw.length; i++) {
       const m = raw[i]!;
       const entry: ContentEntry = {
-        file: toReturnPath(m.file, cwd),
+        file: platform.formatPath(m.file),
         line: m.line,
         text: m.text,
         kind: m.kind,

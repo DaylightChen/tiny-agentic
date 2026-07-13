@@ -1,7 +1,6 @@
 import { z } from "zod";
 import { defineTool } from "../../types/tool.js";
 import type { GlobOptions } from "../../types/platform.js";
-import { toReturnPath } from "./_paths.js";
 
 const DEFAULT_LIMIT = 250;
 
@@ -21,13 +20,12 @@ export const globTool = defineTool({
       respectGitignore: respect_gitignore ?? true,
       includeHidden: include_hidden ?? false,
       limit: limit ?? DEFAULT_LIMIT,
-      ...(path !== undefined ? { cwd: path } : {}),
+      ...(path !== undefined ? { cwd: platform.resolvePath(path) } : {}),
       ...(context.signal !== undefined ? { signal: context.signal } : {}),
     };
 
     const { paths, truncated } = await platform.glob(pattern, options);
-    const cwd = platform.cwd();
-    const files = paths.map((p) => toReturnPath(p, cwd));
+    const files = paths.map((path) => platform.formatPath(path));
 
     return { files, truncated };
   },

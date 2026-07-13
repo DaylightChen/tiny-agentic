@@ -1,5 +1,4 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
-import { join } from "node:path";
 
 import { NodePlatform } from "../platform/node.js";
 
@@ -16,6 +15,10 @@ import { NodePlatform } from "../platform/node.js";
  * timeout option kills it after 100 ms, so the wall-clock cost is minimal.
  */
 const platform = new NodePlatform();
+
+function join(base: string, ...parts: string[]): string {
+  return [base.replace(/\/$/, ""), ...parts].join("/");
+}
 
 class FixedCwdNodePlatform extends NodePlatform {
   constructor(private readonly fixedCwd: string) {

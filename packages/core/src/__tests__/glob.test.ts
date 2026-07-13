@@ -1,5 +1,4 @@
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
-import { join, relative, isAbsolute } from "node:path";
 
 import { NodePlatform } from "../platform/node.js";
 import { globTool } from "../tools/builtin/glob.js";
@@ -11,13 +10,16 @@ import type { ToolCallContext } from "../types/tool.js";
  * built through platform.exec/writeFile (node:fs is lint-forbidden in
  * __tests__). NODE_ENV="test" makes ordering name-asc/deterministic.
  *
- * Note: globTool relativizes returned paths against platform.cwd() (the process
- * cwd). Temp fixtures live outside the process cwd, so returned paths for those
- * are absolute; one dedicated case places a fixture UNDER cwd to exercise the
- * cwd-relative formatting branch.
+ * Note: globTool delegates display formatting to the Platform. With NodePlatform,
+ * temp fixtures outside platform.cwd() stay absolute; one dedicated case places
+ * a fixture under that cwd to exercise NodePlatform's relative formatting branch.
  */
 const platform = new NodePlatform();
 const ctx: ToolCallContext = {};
+
+function join(base: string, ...parts: string[]): string {
+  return [base.replace(/\/$/, ""), ...parts].join("/");
+}
 
 async function makeTempDir(): Promise<string> {
   const { stdout, exitCode } = await platform.exec("mktemp -d", { shell: true });
@@ -83,9 +85,9 @@ describe("glob tool — happy path", () => {
 
       expect(result.files).toHaveLength(1);
       const p = result.files[0]!;
-      // Under cwd → relative, not absolute, and equals path.relative(cwd, abs).
-      expect(isAbsolute(p)).toBe(false);
-      expect(p).toBe(relative(platform.cwd(), join(under, "hit.ts")));
+      // Under cwd → NodePlatform returns a relative display path.
+      expect(p).not.toBe(platform.resolvePath(p));
+      expect(p).toBe(platform.formatPath(join(under, "hit.ts")));
     } finally {
       await removeDir(under);
     }
