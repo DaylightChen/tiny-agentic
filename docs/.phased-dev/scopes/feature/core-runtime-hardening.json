@@ -32,7 +32,7 @@
     }
   ],
   "currentPhase": "engineering",
-  "phaseStatus": "in_progress",
+  "phaseStatus": "complete_awaiting_approval",
   "paths": {
     "researchDir": "docs/feature/core-runtime-hardening/research/",
     "engineeringDir": "docs/feature/core-runtime-hardening/engineering/",

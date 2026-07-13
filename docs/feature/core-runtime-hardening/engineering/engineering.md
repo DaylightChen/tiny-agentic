@@ -1,3 +1,1 @@
-# Feature Engineering Spec — core-runtime-hardening
-
-> Skeleton for the engineering phase. The feature architect will replace this with the binding dated engineering specification after research is approved.
+Binding specification: [`2026-07-13-core-runtime-hardening-engineering.md`](./2026-07-13-core-runtime-hardening-engineering.md)
