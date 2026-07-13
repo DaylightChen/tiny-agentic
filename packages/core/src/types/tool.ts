@@ -18,18 +18,19 @@ import type { SubagentChildEvent } from "./events.js";
 export interface ToolCallContext {
   signal?: AbortSignal;  // populated by agentLoop; tools forward to Platform.exec
   /** Report token usage consumed by work a tool performed out-of-band (e.g. a
-   *  child Agent run). agentLoop folds this into the run's cumulative usage
-   *  after the tool batch. Safe to call multiple times; each call accumulates. */
+   *  child Agent run). Each call's isolated context appends to that call's
+   *  envelope; the loop folds only that usage after yielding and serializing
+   *  the envelope's result. Safe to call multiple times within the call. */
   reportUsage?: (usage: Usage) => void;
-  /** Emit a sanitized child event onto the parent's stream from inside a tool.
-   *  Used by the task tool to surface the child's lifecycle. In v1 the loop
-   *  buffers these and yields them (wrapped as `subagent_event`) immediately
-   *  before the tool's `tool_result`. Never carries child `messages`. */
+  /** Emit a sanitized child event from inside a tool. Each call's isolated
+   *  context buffers events in that call's envelope; the loop yields them
+   *  (wrapped as `subagent_event`) immediately before the same envelope's
+   *  `tool_result`. Never carries child `messages`. */
   emitEvent?: (event: SubagentChildEvent) => void;
-  /** The tool-use id of the call currently executing. Set by `runTools` for
-   *  every call during execution (and cleared immediately after), so a tool can
-   *  correlate emitted events / logs to its own call (the task tool uses it as
-   *  `taskId`). Absent only outside a call (between tool-uses / batches). */
+  /** The tool-use id attributed to this isolated call context. `runTools` sets
+   *  it on a fresh shallow clone for each executable call, so sibling and base
+   *  contexts do not share the per-call property. The task tool uses it as
+   *  `taskId`; envelope ordering does not depend on later context mutation. */
   toolCallId?: string;
   /** Current sub-agent recursion depth: 0 at the top level, incremented by one
    *  for each nested `Agent.run`. Seeded by `agentLoop` from `RunOptions.depth`.

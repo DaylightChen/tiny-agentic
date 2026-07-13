@@ -287,6 +287,26 @@ describe("subagent boundary — T10-T12 (leak-proof, end-to-end)", () => {
     expect("errorMessage" in child).toBe(false);
   });
 
+  it("CB-13: child events stay ordered before their matching task result with the spawning taskId", async () => {
+    const { events } = await runParentWithLeakyChild();
+    const resultIndex = events.findIndex(
+      (event) => event.type === "tool_result" && event.toolName === "task",
+    );
+    const childIndices = events
+      .map((event, index) => event.type === "subagent_event" ? index : -1)
+      .filter((index) => index >= 0);
+
+    expect(resultIndex).toBeGreaterThanOrEqual(0);
+    expect(childIndices.length).toBeGreaterThan(0);
+    for (const index of childIndices) {
+      const event = events[index];
+      if (event?.type !== "subagent_event") throw new Error("expected subagent_event");
+      expect(event.taskId).toBe("task1");
+      expect(index).toBeLessThan(resultIndex);
+    }
+    expect(childIndices).toEqual([...childIndices].sort((a, b) => a - b));
+  });
+
   // Optional hardening — sanitization must not have broken the usage roll-up.
   it("co-assertion: the parent terminal usage includes the child's rolled-up usage", async () => {
     const { terminal } = await runParentWithLeakyChild();

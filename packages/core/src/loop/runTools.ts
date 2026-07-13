@@ -1,118 +1,168 @@
-import type { AgentEvent } from "../types/events.js";
+import type { AgentEvent, SubagentChildEvent } from "../types/events.js";
 import type { Platform } from "../types/platform.js";
-import type { ApprovalDecision, ApprovalHandler, ToolCallContext } from "../types/tool.js";
+import type { ApprovalDecision, ApprovalHandler, Tool, ToolCallContext } from "../types/tool.js";
+import type { Usage } from "../types/usage.js";
 import { ToolRegistry } from "../tools/registry.js";
 
-type ToolUseEntry = { id: string; name: string; input: unknown; parseError?: boolean };
+type ToolUseEntry = {
+  id: string;
+  name: string;
+  input: unknown;
+  parseError?: boolean;
+};
+
+type ToolResultEvent = Extract<AgentEvent, { type: "tool_result" }>;
+
+type ToolExecution = {
+  event: ToolResultEvent;
+  childEvents: SubagentChildEvent[];
+  reportedUsage: Usage[];
+};
+
+function emptyExecution(event: ToolResultEvent): ToolExecution {
+  return { event, childEvents: [], reportedUsage: [] };
+}
+
+async function executeTool(
+  toolUse: ToolUseEntry,
+  tool: Tool,
+  input: unknown,
+  platform: Platform,
+  context: ToolCallContext,
+  childEvents: SubagentChildEvent[],
+  reportedUsage: Usage[],
+): Promise<ToolExecution> {
+  try {
+    const result = await tool.call(input, platform, context);
+    return {
+      event: {
+        type: "tool_result",
+        toolName: tool.name,
+        toolCallId: toolUse.id,
+        result,
+        isError: false,
+      },
+      childEvents,
+      reportedUsage,
+    };
+  } catch (err) {
+    return {
+      event: {
+        type: "tool_result",
+        toolName: tool.name,
+        toolCallId: toolUse.id,
+        result: err instanceof Error ? err.message : String(err),
+        isError: true,
+      },
+      childEvents,
+      reportedUsage,
+    };
+  }
+}
 
 /**
- * Sequential tool execution for M1.
- * Yields tool_result AgentEvents as each tool completes.
- * M2: add isConcurrencySafe() batching here — check tool.isConcurrencySafe?.(input)
- * and run safe calls via Promise.all — without changing this call site.
+ * Executes tool calls sequentially and yields one isolated attribution envelope
+ * after each call. Safe batching is added by the next scheduler task.
  */
 export async function* runTools(
   toolUses: ToolUseEntry[],
   registry: ToolRegistry,
   platform: Platform,
-  context: ToolCallContext,
+  baseContext: ToolCallContext,
   approvalHandler?: ApprovalHandler,
-): AsyncGenerator<AgentEvent> {
-  for (const tu of toolUses) {
-    // Correlation id for the currently-executing call (a tool reads it as its
-    // own tool-use id, e.g. the task tool's `taskId`). Set per tool-use and
-    // cleared in the finally so the early-return branches below (unknown tool,
-    // parse failure, validation failure, denied approval) cannot leak this id
-    // into a later call's context.
-    context.toolCallId = tu.id;
-    try {
-      const tool = registry.findByName(tu.name);
+): AsyncGenerator<ToolExecution> {
+  for (const toolUse of toolUses) {
+    const tool = registry.findByName(toolUse.name);
 
-      if (tool === undefined) {
-        yield {
-          type: "tool_result",
-          toolName: tu.name,
-          toolCallId: tu.id,
-          result: `Unknown tool: '${tu.name}'`,
-          isError: true,
-        };
-        continue;
-      }
+    if (tool === undefined) {
+      yield emptyExecution({
+        type: "tool_result",
+        toolName: toolUse.name,
+        toolCallId: toolUse.id,
+        result: `Unknown tool: '${toolUse.name}'`,
+        isError: true,
+      });
+      continue;
+    }
 
-      // Malformed streamed tool input (§6.1). The mapper could not JSON.parse the
-      // accumulated input_json_delta and flagged this entry with parseError: true
-      // (its `input` is a placeholder {}). Detect it BEFORE Zod so the model gets
-      // the dedicated parse-error message, not an ambiguous Zod validation failure.
-      if (tu.parseError) {
-        yield {
-          type: "tool_result",
-          toolName: tool.name,
-          toolCallId: tu.id,
-          result: `Tool '${tool.name}': could not parse tool input as JSON`,
-          isError: true,
-        };
-        continue;
-      }
+    if (toolUse.parseError) {
+      yield emptyExecution({
+        type: "tool_result",
+        toolName: tool.name,
+        toolCallId: toolUse.id,
+        result: `Tool '${tool.name}': could not parse tool input as JSON`,
+        isError: true,
+      });
+      continue;
+    }
 
-      const parseResult = tool.inputSchema.safeParse(tu.input);
-      if (!parseResult.success) {
-        yield {
-          type: "tool_result",
-          toolName: tool.name,
-          toolCallId: tu.id,
-          result: `Tool '${tool.name}': invalid input — ${parseResult.error.message}`,
-          isError: true,
-        };
-        continue;
-      }
+    const parseResult = tool.inputSchema.safeParse(toolUse.input);
+    if (!parseResult.success) {
+      yield emptyExecution({
+        type: "tool_result",
+        toolName: tool.name,
+        toolCallId: toolUse.id,
+        result: `Tool '${tool.name}': invalid input — ${parseResult.error.message}`,
+        isError: true,
+      });
+      continue;
+    }
 
-      // Approval gate — runs after Zod validation, before tool.call
-      if (approvalHandler !== undefined) {
-        let decision: ApprovalDecision;
-        try {
-          decision = await approvalHandler(tool.name, parseResult.data);
-        } catch (err) {
-          yield {
-            type: "tool_result",
-            toolName: tool.name,
-            toolCallId: tu.id,
-            result: `Tool '${tool.name}': approval check failed — ${err instanceof Error ? err.message : String(err)}`,
-            isError: true,
-          };
-          continue;
-        }
-        if (decision !== 'allow') {
-          yield {
-            type: "tool_result",
-            toolName: tool.name,
-            toolCallId: tu.id,
-            result: `Tool '${tool.name}': call denied by approvalHandler`,
-            isError: true,
-          };
-          continue;
-        }
-      }
+    const childEvents: SubagentChildEvent[] = [];
+    const reportedUsage: Usage[] = [];
+    const context: ToolCallContext = {
+      ...baseContext,
+      toolCallId: toolUse.id,
+      reportUsage: (usage) => {
+        reportedUsage.push(usage);
+      },
+      emitEvent: (event) => {
+        childEvents.push(event);
+      },
+    };
 
+    if (approvalHandler !== undefined) {
+      let decision: ApprovalDecision;
       try {
-        const result = await tool.call(parseResult.data, platform, context);
-        yield {
-          type: "tool_result",
-          toolName: tool.name,
-          toolCallId: tu.id,
-          result,
-          isError: false,
-        };
+        decision = await approvalHandler(tool.name, parseResult.data);
       } catch (err) {
         yield {
-          type: "tool_result",
-          toolName: tool.name,
-          toolCallId: tu.id,
-          result: err instanceof Error ? err.message : String(err),
-          isError: true,
+          event: {
+            type: "tool_result",
+            toolName: tool.name,
+            toolCallId: toolUse.id,
+            result: `Tool '${tool.name}': approval check failed — ${err instanceof Error ? err.message : String(err)}`,
+            isError: true,
+          },
+          childEvents,
+          reportedUsage,
         };
+        continue;
       }
-    } finally {
-      delete context.toolCallId;
+      if (decision !== "allow") {
+        yield {
+          event: {
+            type: "tool_result",
+            toolName: tool.name,
+            toolCallId: toolUse.id,
+            result: `Tool '${tool.name}': call denied by approvalHandler`,
+            isError: true,
+          },
+          childEvents,
+          reportedUsage,
+        };
+        continue;
+      }
     }
+
+    yield await executeTool(
+      toolUse,
+      tool,
+      parseResult.data,
+      platform,
+      context,
+      childEvents,
+      reportedUsage,
+    );
   }
 }

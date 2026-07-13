@@ -6,7 +6,15 @@ import { ToolRegistry } from "../tools/registry.js";
 import { defineTool } from "../types/tool.js";
 import type { Tool, ToolCallContext } from "../types/tool.js";
 import type { Platform, ExecResult, ExecOptions } from "../types/platform.js";
-import type { AgentEvent } from "../types/events.js";
+
+declare module "../types/tool.js" {
+  interface ToolCallContext {
+    testAttributionScalar?: string;
+    sharedTestService?: { label: string };
+  }
+}
+
+type ToolExecution = ReturnType<typeof runTools> extends AsyncGenerator<infer T> ? T : never;
 
 /**
  * Minimal Platform stub. Each filesystem op can be overridden per test;
@@ -62,22 +70,21 @@ function makeRegistry(tools: Tool[]): ToolRegistry {
 
 const ctx: ToolCallContext = {};
 
-/** Drive the runTools generator to completion, collecting all events. */
-async function collect(gen: AsyncGenerator<AgentEvent>): Promise<AgentEvent[]> {
-  const out: AgentEvent[] = [];
-  for await (const e of gen) out.push(e);
+/** Drive the runTools generator to completion, collecting attributed envelopes. */
+async function collect(gen: AsyncGenerator<ToolExecution>): Promise<ToolExecution[]> {
+  const out: ToolExecution[] = [];
+  for await (const execution of gen) out.push(execution);
   return out;
 }
 
-/** Assert an event exists at `index` and is a tool_result, returning it narrowed. */
+/** Assert an envelope exists at `index`, returning its tool_result event. */
 function toolResultAt(
-  events: AgentEvent[],
+  executions: ToolExecution[],
   index: number,
-): Extract<AgentEvent, { type: "tool_result" }> {
-  const ev = events[index];
-  if (!ev) throw new Error(`no event at index ${index}`);
-  if (ev.type !== "tool_result") throw new Error(`event ${index} is ${ev.type}, not tool_result`);
-  return ev;
+): ToolExecution["event"] {
+  const execution = executions[index];
+  if (!execution) throw new Error(`no execution at index ${index}`);
+  return execution.event;
 }
 
 describe("runTools", () => {
@@ -94,11 +101,15 @@ describe("runTools", () => {
 
     expect(events).toHaveLength(1);
     expect(events[0]).toEqual({
-      type: "tool_result",
-      toolName: "no_such_tool",
-      toolCallId: "1",
-      result: "Unknown tool: 'no_such_tool'",
-      isError: true,
+      event: {
+        type: "tool_result",
+        toolName: "no_such_tool",
+        toolCallId: "1",
+        result: "Unknown tool: 'no_such_tool'",
+        isError: true,
+      },
+      childEvents: [],
+      reportedUsage: [],
     });
   });
 
@@ -142,11 +153,15 @@ describe("runTools", () => {
 
     expect(events).toHaveLength(1);
     expect(events[0]).toEqual({
-      type: "tool_result",
-      toolName: "echo_ok",
-      toolCallId: "42",
-      result: { ok: true },
-      isError: false,
+      event: {
+        type: "tool_result",
+        toolName: "echo_ok",
+        toolCallId: "42",
+        result: { ok: true },
+        isError: false,
+      },
+      childEvents: [],
+      reportedUsage: [],
     });
   });
 
@@ -261,61 +276,172 @@ describe("runTools", () => {
     );
 
     expect(events).toHaveLength(2);
-    expect(events.map((e) => (e.type === "tool_result" ? e.toolName : e.type))).toEqual([
-      "first",
-      "second",
-    ]);
-    expect(events.map((e) => (e.type === "tool_result" ? e.toolCallId : ""))).toEqual([
-      "1",
-      "2",
-    ]);
+    expect(events.map((execution) => execution.event.toolName)).toEqual(["first", "second"]);
+    expect(events.map((execution) => execution.event.toolCallId)).toEqual(["1", "2"]);
   });
 });
 
-describe("runTools — toolCallId correlation (task-02)", () => {
-  it("sets context.toolCallId to the current tool-use id during the call", async () => {
-    let seen: string | undefined = "UNSET";
+describe("runTools — per-call attribution envelopes", () => {
+  it("CB-12: gives each call a distinct context and local mutation cannot alter its sibling or base", async () => {
+    const seenContexts: ToolCallContext[] = [];
+    const seenIds: Array<string | undefined> = [];
+    const sharedService = { label: "shared" };
+    const baseReportUsage = vi.fn();
+    const baseEmitEvent = vi.fn();
+    const baseContext: ToolCallContext = {
+      toolCallId: "base-id",
+      reportUsage: baseReportUsage,
+      emitEvent: baseEmitEvent,
+      testAttributionScalar: "merged-scalar",
+      sharedTestService: sharedService,
+    };
+
     const tool = defineTool({
-      name: "capture_id",
-      description: "captures its toolCallId",
-      inputSchema: z.object({}).passthrough(),
-      call: async (_input, _platform, context) => {
-        seen = context.toolCallId;
+      name: "inspect_context",
+      description: "inspects per-call context",
+      inputSchema: z.object({ mutate: z.boolean() }),
+      call: async ({ mutate }, _platform, context) => {
+        seenContexts.push(context);
+        seenIds.push(context.toolCallId);
+        expect(context.testAttributionScalar).toBe("merged-scalar");
+        expect(context.sharedTestService).toBe(sharedService);
+        if (mutate) {
+          context.testAttributionScalar = "local-only";
+          delete context.toolCallId;
+          delete context.reportUsage;
+          delete context.emitEvent;
+        }
         return "ok";
       },
     });
-    const localCtx: ToolCallContext = {};
 
-    await collect(
-      runTools([{ id: "abc-123", name: "capture_id", input: {} }], makeRegistry([tool]), new MockPlatform(), localCtx),
-    );
+    await collect(runTools(
+      [
+        { id: "call-a", name: "inspect_context", input: { mutate: true } },
+        { id: "call-b", name: "inspect_context", input: { mutate: false } },
+      ],
+      makeRegistry([tool]),
+      new MockPlatform(),
+      baseContext,
+    ));
 
-    expect(seen).toBe("abc-123");
-  });
-
-  it("clears context.toolCallId after the batch (finally), so it does not leak past the call", async () => {
-    const tool = defineTool({
-      name: "capture_id",
-      description: "captures its toolCallId",
-      inputSchema: z.object({}).passthrough(),
-      call: async () => "ok",
+    expect(seenIds).toEqual(["call-a", "call-b"]);
+    expect(seenContexts).toHaveLength(2);
+    expect(seenContexts[0]).not.toBe(seenContexts[1]);
+    expect(seenContexts[0]).not.toBe(baseContext);
+    expect(seenContexts[1]).not.toBe(baseContext);
+    expect(baseContext).toEqual({
+      toolCallId: "base-id",
+      reportUsage: baseReportUsage,
+      emitEvent: baseEmitEvent,
+      testAttributionScalar: "merged-scalar",
+      sharedTestService: sharedService,
     });
-    const localCtx: ToolCallContext = {};
-
-    await collect(
-      runTools([{ id: "abc-123", name: "capture_id", input: {} }], makeRegistry([tool]), new MockPlatform(), localCtx),
-    );
-
-    // Cleared via `delete` in the finally — the property must be ABSENT, not
-    // merely undefined, so a later observer sees no stale correlation id.
-    expect(localCtx.toolCallId).toBeUndefined();
-    expect("toolCallId" in localCtx).toBe(false);
+    expect(baseReportUsage).not.toHaveBeenCalled();
+    expect(baseEmitEvent).not.toHaveBeenCalled();
   });
 
-  it("does not leak a prior tool-use id into a later call after an early-return branch", async () => {
-    // First entry is an unknown tool (early `continue` before any call). The
-    // finally must still clear toolCallId so the SECOND tool observes its own
-    // id, not the unknown tool's "unknown-1".
+  it("CB-14/CB-20: keeps event and usage buffers call-local even when an old context is retained", async () => {
+    let staleContext: ToolCallContext | undefined;
+    const firstUsage = { inputTokens: 1, outputTokens: 2, cacheReadTokens: 3 };
+    const staleUsage = { inputTokens: 50, outputTokens: 60, cacheReadTokens: 70 };
+    const secondUsage = { inputTokens: 4, outputTokens: 5, cacheReadTokens: 6 };
+
+    const tool = defineTool({
+      name: "retain_context",
+      description: "retains and invokes callbacks",
+      inputSchema: z.object({ call: z.number() }),
+      call: async ({ call }, _platform, context) => {
+        if (call === 1) {
+          staleContext = context;
+          context.emitEvent?.({ type: "text_delta", text: "first-live" });
+          context.reportUsage?.(firstUsage);
+        } else {
+          staleContext?.emitEvent?.({ type: "text_delta", text: "stale-late" });
+          staleContext?.reportUsage?.(staleUsage);
+          context.emitEvent?.({ type: "text_delta", text: "second-live" });
+          context.reportUsage?.(secondUsage);
+        }
+        return `result-${call}`;
+      },
+    });
+
+    const executions = await collect(runTools(
+      [
+        { id: "one", name: "retain_context", input: { call: 1 } },
+        { id: "two", name: "retain_context", input: { call: 2 } },
+      ],
+      makeRegistry([tool]),
+      new MockPlatform(),
+      {},
+    ));
+
+    expect(executions[0]?.childEvents).toEqual([
+      { type: "text_delta", text: "first-live" },
+      { type: "text_delta", text: "stale-late" },
+    ]);
+    expect(executions[0]?.reportedUsage).toEqual([firstUsage, staleUsage]);
+    expect(executions[1]?.childEvents).toEqual([{ type: "text_delta", text: "second-live" }]);
+    expect(executions[1]?.reportedUsage).toEqual([secondUsage]);
+    expect(executions[0]?.childEvents).not.toBe(executions[1]?.childEvents);
+    expect(executions[0]?.reportedUsage).not.toBe(executions[1]?.reportedUsage);
+  });
+
+  it("CB-15: does not classify or Promise-batch calls and starts the second only after the first settles", async () => {
+    let releaseFirst: (() => void) | undefined;
+    let firstSettled = false;
+    let secondStarted = false;
+    const firstGate = new Promise<void>((resolve) => { releaseFirst = resolve; });
+    const classifier = vi.fn(() => true);
+    const order: string[] = [];
+
+    const first = defineTool({
+      name: "task_like_first",
+      description: "unmarked Task-like call",
+      inputSchema: z.object({}),
+      isConcurrencySafe: classifier,
+      call: async () => {
+        order.push("first:start");
+        await firstGate;
+        firstSettled = true;
+        order.push("first:end");
+        return "first";
+      },
+    });
+    const second = defineTool({
+      name: "task_like_second",
+      description: "unmarked Task-like call",
+      inputSchema: z.object({}),
+      isConcurrencySafe: classifier,
+      call: async () => {
+        secondStarted = true;
+        order.push("second:start");
+        expect(firstSettled).toBe(true);
+        return "second";
+      },
+    });
+
+    const collecting = collect(runTools(
+      [
+        { id: "one", name: first.name, input: {} },
+        { id: "two", name: second.name, input: {} },
+      ],
+      makeRegistry([first, second]),
+      new MockPlatform(),
+      {},
+    ));
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(secondStarted).toBe(false);
+    expect(classifier).not.toHaveBeenCalled();
+    releaseFirst?.();
+    await collecting;
+    expect(order).toEqual(["first:start", "first:end", "second:start"]);
+    expect(classifier).not.toHaveBeenCalled();
+  });
+
+  it("does not leak an early-return tool-use id into a later executable call", async () => {
     let seenBySecond: string | undefined = "UNSET";
     const second = defineTool({
       name: "second",
@@ -326,22 +452,20 @@ describe("runTools — toolCallId correlation (task-02)", () => {
         return "ok";
       },
     });
-    const localCtx: ToolCallContext = {};
+    const baseContext: ToolCallContext = {};
 
-    await collect(
-      runTools(
-        [
-          { id: "unknown-1", name: "no_such_tool", input: {} },
-          { id: "second-2", name: "second", input: {} },
-        ],
-        makeRegistry([second]),
-        new MockPlatform(),
-        localCtx,
-      ),
-    );
+    await collect(runTools(
+      [
+        { id: "unknown-1", name: "no_such_tool", input: {} },
+        { id: "second-2", name: "second", input: {} },
+      ],
+      makeRegistry([second]),
+      new MockPlatform(),
+      baseContext,
+    ));
 
     expect(seenBySecond).toBe("second-2");
-    expect("toolCallId" in localCtx).toBe(false);
+    expect("toolCallId" in baseContext).toBe(false);
   });
 });
 

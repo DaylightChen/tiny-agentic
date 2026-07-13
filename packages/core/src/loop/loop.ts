@@ -1,6 +1,6 @@
 import type { Provider, StopReason } from "../types/provider.js";
 import type { Platform } from "../types/platform.js";
-import type { AgentEvent, Terminal, SubagentChildEvent } from "../types/events.js";
+import type { AgentEvent, Terminal } from "../types/events.js";
 import type { Message, ContentBlock } from "../types/messages.js";
 import type { ApprovalHandler, ToolCallContext } from "../types/tool.js";
 import { type Usage, EMPTY_USAGE, accumulateUsage } from "../types/usage.js";
@@ -118,88 +118,43 @@ export async function* agentLoop(params: LoopParams): AsyncGenerator<AgentEvent,
     if (pendingToolUses.length > 0) {
       const toolResultBlocks: ContentBlock[] = [];
 
-      // Per-batch usage sink: tools that perform out-of-band work (e.g. a child
-      // Agent run) call context.reportUsage to contribute tokens. Folded into
-      // cumulativeUsage once, after the whole batch (see below) — not per call —
-      // so a tool erroring after reporting still has its usage counted exactly
-      // once (E5: no double-count, no loss-on-error).
-      const reportedUsage: Usage[] = [];
-      context.reportUsage = (u) => {
-        reportedUsage.push(u);
-      };
+      for await (const execution of runTools(pendingToolUses, registry, platform, context, approvalHandler)) {
+        const toolEvent = execution.event;
 
-      // Per-call child-event sink. runTools is sequential and yields a tool's
-      // tool_result synchronously after its call resolves, before starting the
-      // next tool — so at the moment we receive a tool_result, childEvents holds
-      // exactly that call's emitted events and nothing from a later tool. We
-      // flush them (as subagent_event) immediately before that tool_result, then
-      // reset the buffer (R3: batch-before-tool_result ordering).
-      let childEvents: SubagentChildEvent[] = [];
-      context.emitEvent = (e) => {
-        childEvents.push(e);
-      };
+        for (const childEvent of execution.childEvents) {
+          yield { type: "subagent_event", taskId: toolEvent.toolCallId, event: childEvent };
+        }
 
-      for await (const toolEvent of runTools(pendingToolUses, registry, platform, context, approvalHandler)) {
-        if (toolEvent.type === "tool_result") {
-          // Flush this call's buffered child events BEFORE its tool_result, so
-          // they land after the spawning tool_use_start and before the result,
-          // correlated by taskId (== the call's tool-use id).
-          for (const childEvent of childEvents) {
-            yield { type: "subagent_event", taskId: toolEvent.toolCallId, event: childEvent };
-          }
-          childEvents = [];
+        yield toolEvent;
 
-          yield toolEvent; // { type: "tool_result", ... }
+        // Serialize defensively. A successful tool can still return an
+        // unserializable value (circular ref, BigInt), and serializeToolResult
+        // would throw. Catch it here so it becomes a recoverable tool error
+        // (spec §5.6 — "could not serialize result") rather than an exception
+        // thrown to the caller.
+        let content: string;
+        let isError = toolEvent.isError;
+        try {
+          content = serializeToolResult(toolEvent.result);
+        } catch (err) {
+          content = `Tool '${toolEvent.toolName}': could not serialize result — ${
+            err instanceof Error ? err.message : String(err)
+          }`;
+          isError = true;
+        }
+        toolResultBlocks.push({
+          type: "tool_result",
+          tool_use_id: toolEvent.toolCallId,
+          content,
+          is_error: isError,
+        });
 
-          // Serialize defensively. A successful tool can still return an
-          // unserializable value (circular ref, BigInt), and serializeToolResult
-          // would throw. Catch it here so it becomes a recoverable tool error
-          // (spec §5.6 — "could not serialize result") rather than an exception
-          // thrown to the caller. runTools itself never throws: every tool.call
-          // is individually try/caught inside it, so this is the only throw site
-          // in the tool-execution phase.
-          let content: string;
-          let isError = toolEvent.isError;
-          try {
-            content = serializeToolResult(toolEvent.result);
-          } catch (err) {
-            content = `Tool '${toolEvent.toolName}': could not serialize result — ${
-              err instanceof Error ? err.message : String(err)
-            }`;
-            isError = true;
-          }
-          toolResultBlocks.push({
-            type: "tool_result",
-            tool_use_id: toolEvent.toolCallId,
-            content,
-            is_error: isError,
-          });
+        for (const usage of execution.reportedUsage) {
+          cumulativeUsage = accumulateUsage(cumulativeUsage, usage);
         }
       }
 
       workingMessages.push({ role: "user", content: toolResultBlocks });
-
-      // Fold tool-reported usage into the RUN's cumulative total exactly once,
-      // after the batch. This total surfaces on the terminal event's `usage`
-      // (agent_done / max_turns_exceeded / agent_error) — NOT on `turn_complete`,
-      // whose `usage` is the parent's own per-turn tokens and never includes
-      // child spend. A consumer building a live cost meter must therefore read
-      // child cost from each `subagent_event` terminal's `usage`; summing
-      // `turn_complete.usage` alone under-counts by the entire child spend.
-      // Usage rolls up from reportUsage ONLY; emitted child events are for
-      // observation, never accounting (E5).
-      for (const u of reportedUsage) {
-        cumulativeUsage = accumulateUsage(cumulativeUsage, u);
-      }
-
-      // Clear the per-batch sinks now that the batch is drained and folded,
-      // mirroring the per-call `delete context.toolCallId` in runTools. Tools
-      // call these synchronously within their awaited `call`, so nothing needs
-      // them after this point; clearing stops a future fire-and-forget tool that
-      // retained `context` from pushing usage/events into a later turn's live
-      // buffer (misattributed taskId / double-counted usage).
-      delete context.reportUsage;
-      delete context.emitEvent;
 
       yield {
         type: "turn_complete",

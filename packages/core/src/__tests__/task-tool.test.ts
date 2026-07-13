@@ -558,6 +558,66 @@ describe("createTaskTool — T1-T9", () => {
 // SubagentChildEvent for every child run).
 // ===========================================================================
 
+describe("createTaskTool — sequential per-call attribution (CB-15)", () => {
+  it("runs two Task calls one at a time and keeps each child lifecycle under its spawning taskId", async () => {
+    let activeChildren = 0;
+    let maxActiveChildren = 0;
+    const resolutions: string[] = [];
+    const taskTool = createTaskTool({
+      resolveChild: ({ prompt }) => {
+        resolutions.push(prompt);
+        activeChildren++;
+        maxActiveChildren = Math.max(maxActiveChildren, activeChildren);
+        const provider: Provider = {
+          async *stream(): AsyncGenerator<ProviderEvent> {
+            yield { type: "text_delta", text: `child:${prompt}` };
+            await Promise.resolve();
+            activeChildren--;
+            yield { type: "message_stop", stopReason: { kind: "end_turn", raw: "end_turn" } };
+          },
+        };
+        return new Agent({ provider, tools: [], platform: new MockPlatform() });
+      },
+    });
+    const provider = new MockProvider([
+      [
+        { type: "tool_use", id: "task-a", name: "task", input: { prompt: "A" } },
+        { type: "tool_use", id: "task-b", name: "task", input: { prompt: "B" } },
+        { type: "message_stop", stopReason: { kind: "tool_use", raw: "tool_use" } },
+      ],
+      [
+        { type: "text_delta", text: "parent done" },
+        { type: "message_stop", stopReason: { kind: "end_turn", raw: "end_turn" } },
+      ],
+    ]);
+    const parent = new Agent({ provider, tools: [taskTool], platform: new MockPlatform() });
+
+    const { events } = await collectEvents(parent.run("go"));
+    const results = events.filter(
+      (event): event is Extract<AgentEvent, { type: "tool_result" }> =>
+        event.type === "tool_result" && event.toolName === "task",
+    );
+    const childText = events.filter(
+      (event): event is Extract<AgentEvent, { type: "subagent_event" }> =>
+        event.type === "subagent_event" && event.event.type === "text_delta",
+    );
+
+    expect(maxActiveChildren).toBe(1);
+    expect(resolutions).toEqual(["A", "B"]);
+    expect(results.map(({ toolCallId, result }) => [toolCallId, result])).toEqual([
+      ["task-a", "child:A"],
+      ["task-b", "child:B"],
+    ]);
+    expect(childText.map(({ taskId, event }) => [
+      taskId,
+      event.type === "text_delta" ? event.text : "",
+    ])).toEqual([
+      ["task-a", "child:A"],
+      ["task-b", "child:B"],
+    ]);
+  });
+});
+
 describe("createTaskTool — boundary invariants", () => {
   it("emits a sanitized `terminal` SubagentChildEvent for a completed child run", async () => {
     const resolveChild = () =>

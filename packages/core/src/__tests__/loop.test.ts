@@ -5,7 +5,7 @@ import { agentLoop } from "../loop/loop.js";
 import type { LoopParams } from "../loop/loop.js";
 import { collectEvents } from "../utils/collect.js";
 import { ToolRegistry } from "../tools/registry.js";
-import { defineTool } from "../types/tool.js";
+import { defineTool, type ToolCallContext } from "../types/tool.js";
 import type { Provider, ProviderEvent, ProviderRequest } from "../types/provider.js";
 import type { Platform, ExecResult } from "../types/platform.js";
 import type { Message, ToolResultBlock } from "../types/messages.js";
@@ -1419,5 +1419,62 @@ describe("agentLoop — subagent seams", () => {
     for (const i of subIdxs) {
       expect(i > firstResultIdx && i < secondResultIdx).toBe(false);
     }
+  });
+
+  it("CB-20: stale callbacks retained from a prior turn cannot contaminate a later turn", async () => {
+    let retainedEmit: ToolCallContext["emitEvent"];
+    let retainedReport: ToolCallContext["reportUsage"];
+    const staleUsage = { inputTokens: 100, outputTokens: 200, cacheReadTokens: 300 };
+    const liveUsage = { inputTokens: 4, outputTokens: 5, cacheReadTokens: 6 };
+
+    const retainingTool = defineTool({
+      name: "retain_callbacks",
+      description: "retains its per-call callbacks",
+      inputSchema: z.object({ turn: z.number() }),
+      call: async ({ turn }, _platform, context) => {
+        if (turn === 1) {
+          retainedEmit = context.emitEvent;
+          retainedReport = context.reportUsage;
+          context.emitEvent?.({ type: "text_delta", text: "turn-one-live" });
+        } else {
+          retainedEmit?.({ type: "text_delta", text: "turn-one-stale" });
+          retainedReport?.(staleUsage);
+          context.emitEvent?.({ type: "text_delta", text: "turn-two-live" });
+          context.reportUsage?.(liveUsage);
+        }
+        return `turn-${turn}`;
+      },
+    });
+    const provider = new MockProvider([
+      [
+        { type: "tool_use", id: "turn-one-id", name: retainingTool.name, input: { turn: 1 } },
+        { type: "message_stop", stopReason: { kind: "tool_use", raw: "tool_use" } },
+      ],
+      [
+        { type: "tool_use", id: "turn-two-id", name: retainingTool.name, input: { turn: 2 } },
+        { type: "message_stop", stopReason: { kind: "tool_use", raw: "tool_use" } },
+      ],
+      [
+        { type: "text_delta", text: "done" },
+        { type: "message_stop", stopReason: { kind: "end_turn", raw: "end_turn" } },
+      ],
+    ]);
+
+    const { events, terminal } = await collectEvents(
+      agentLoop(makeParams(provider, new ToolRegistry([retainingTool]))),
+    );
+    const childEvents = events.filter(
+      (event): event is Extract<AgentEvent, { type: "subagent_event" }> =>
+        event.type === "subagent_event",
+    );
+
+    expect(childEvents.map(({ taskId, event }) => [
+      taskId,
+      event.type === "text_delta" ? event.text : event.type,
+    ])).toEqual([
+      ["turn-one-id", "turn-one-live"],
+      ["turn-two-id", "turn-two-live"],
+    ]);
+    expect(terminal.usage).toEqual(liveUsage);
   });
 });
