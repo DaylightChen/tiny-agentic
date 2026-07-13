@@ -31,8 +31,8 @@
       ]
     }
   ],
-  "currentPhase": "plan",
-  "phaseStatus": "complete_awaiting_approval",
+  "currentPhase": "implement",
+  "phaseStatus": "in_progress",
   "paths": {
     "researchDir": "docs/feature/core-runtime-hardening/research/",
     "engineeringDir": "docs/feature/core-runtime-hardening/engineering/",
@@ -50,6 +50,11 @@
       "phase": "engineering",
       "completedAt": "2026-07-13T10:03:46+08:00",
       "approvedAt": "2026-07-13T10:03:46+08:00"
+    },
+    {
+      "phase": "plan",
+      "completedAt": "2026-07-13T10:35:31+08:00",
+      "approvedAt": "2026-07-13T10:35:31+08:00"
     }
   ]
 }

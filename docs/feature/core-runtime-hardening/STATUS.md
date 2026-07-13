@@ -5,16 +5,16 @@
 > The machine-readable source of truth is `docs/.phased-dev/scopes/feature/core-runtime-hardening.json`.
 
 ## Current Phase
-**plan** (complete — awaiting approval)
+**implement** (in progress)
 
 ## Last Completed
 - `research` approved (2026-07-13): `docs/feature/core-runtime-hardening/research/2026-07-13-core-runtime-hardening-research.md`.
 - `engineering` approved (2026-07-13): `docs/feature/core-runtime-hardening/engineering/2026-07-13-core-runtime-hardening-engineering.md`.
-- `plan` complete (2026-07-13): `docs/feature/core-runtime-hardening/plan/implementation-plan.md` + 8 task briefs.
+- `plan` approved (2026-07-13): `docs/feature/core-runtime-hardening/plan/implementation-plan.md` + 8 task briefs.
 
 ## What's Next
-- Review the implementation plan and task briefs.
-- Run `/phased-dev:advance-phase` to move to `implement`, then `/phased-dev:start-task 01`.
+- Task 01 (`stop-reason-provider-contract`) is beginning its dev loop.
+- After completion, continue sequentially with `/phased-dev:start-task 02`.
 
 ## Task Progress
 | # | Task | Status |
