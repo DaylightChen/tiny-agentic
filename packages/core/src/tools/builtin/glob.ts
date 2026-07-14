@@ -7,7 +7,7 @@ const DEFAULT_LIMIT = 250;
 export const globTool = defineTool({
   name: "glob",
   description:
-    'Find files by glob pattern (e.g. "src/**/*.ts"). Returns paths sorted by modification time, most recent first. Does not search file contents — use grep for that.',
+    'Find files by glob pattern (e.g. "src/**/*.ts"). Returns matched paths in the configured Platform’s display order. Does not search file contents — use grep for that.',
   inputSchema: z.object({
     pattern: z.string().describe('Glob pattern, e.g. "src/**/*.ts".'),
     path: z.string().optional().describe("Base directory to glob from. Defaults to the working directory."),
