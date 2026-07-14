@@ -5,28 +5,38 @@
 > The machine-readable source of truth is `docs/.phased-dev/scopes/feature/core-runtime-hardening.json`.
 
 ## Current Phase
-**implement** (in progress)
+**implement** (complete)
 
 ## Last Completed
 - `research` approved (2026-07-13): `docs/feature/core-runtime-hardening/research/2026-07-13-core-runtime-hardening-research.md`.
 - `engineering` approved (2026-07-13): `docs/feature/core-runtime-hardening/engineering/2026-07-13-core-runtime-hardening-engineering.md`.
 - `plan` approved (2026-07-13): `docs/feature/core-runtime-hardening/plan/implementation-plan.md` + 8 task briefs.
+- `implement` complete (2026-07-14): all 8 tasks passed implement → test → review → fix loops with per-task commits and completion markers.
 
 ## What's Next
-- Task 01 (`stop-reason-provider-contract`) is beginning its dev loop.
-- After completion, continue sequentially with `/phased-dev:start-task 02`.
+- Feature `core-runtime-hardening` is complete; `implement` is the terminal phase.
+- Review and push the branch / open a pull request when ready. No publish, tag, or release was performed.
 
 ## Task Progress
 | # | Task | Status |
 |---|------|--------|
-| 01 | stop-reason-provider-contract | pending |
-| 02 | stop-reason-loop-propagation | pending |
-| 03 | platform-path-ordering-contract | pending |
-| 04 | portable-tools-boundary-proof | pending |
-| 05 | per-call-attribution-envelopes | pending |
-| 06 | safe-batch-scheduler | pending |
-| 07 | safe-builtins-loop-cancellation | pending |
-| 08 | docs-examples-release-readiness | pending |
+| 01 | stop-reason-provider-contract | done (`c821b54`) |
+| 02 | stop-reason-loop-propagation | done (`1ac1566`) |
+| 03 | platform-path-ordering-contract | done (`ed7c4b6`) |
+| 04 | portable-tools-boundary-proof | done (`689e957`) |
+| 05 | per-call-attribution-envelopes | done (`640b92a`) |
+| 06 | safe-batch-scheduler | done (`6e2c60a`) |
+| 07 | safe-builtins-loop-cancellation | done (`9e01d86`) |
+| 08 | docs-examples-release-readiness | done (`969c97b`) |
+
+## Final Verification
+- Node: `v22.22.0`
+- Tests: 25 files, 477 tests passed
+- Workspace typecheck: passed
+- Examples typecheck: passed
+- Lint: passed
+- Build: passed
+- Portability boundary: 26 ESLint fixtures, 11 parser fixtures, 8 built-ins, recursive main-bundle graph passed
 
 ## Blockers
-- Final task completion requires the full verification gate on Node 22. The current local environment reports Node 20.18.1.
+None
