@@ -114,7 +114,7 @@ export async function* agentLoop(params: LoopParams): AsyncGenerator<AgentEvent,
 
     turnsUsed++;
 
-    // Tool execution
+    // Tool execution preserves model order while runTools may overlap safe batches.
     if (pendingToolUses.length > 0) {
       const toolResultBlocks: ContentBlock[] = [];
 

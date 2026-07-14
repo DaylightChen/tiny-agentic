@@ -46,9 +46,9 @@
 
 **Discovered:** 2026-07-02 (implement, feature/task-tool Task 05)
 **Status:** open (deferred by design, R6)
-**Symptom:** v1 runs `task` calls one at a time — `runTools` executes tool calls sequentially, so two `task` calls in one turn run one after another, not concurrently. A model prompted to parallelize sub-agents cannot in v1. The tool description states "Sub-tasks run one at a time in this version." so the model does not assume otherwise.
-**Workaround:** None needed for correctness; delegation still works, just serially.
-**Revisit when:** Parallel sub-agents are wanted. The future path is the `isConcurrencySafe` seam on `Tool` (`packages/core/src/types/tool.ts`) — a child run is I/O-bound and independent, a natural concurrency candidate.
+**Symptom:** Approved concurrency-safe filesystem calls (`read_file`, `ls`, `glob`, and `grep`) now run in maximal contiguous batches, but `task` remains unmarked and is therefore a barrier. Two Task calls in one turn run one after another. The tool description states "Sub-tasks run one at a time in this version." so the model does not assume otherwise.
+**Workaround:** None needed for correctness; delegation remains serial while child event, usage, and cancellation attribution stay deterministic.
+**Revisit when:** Parallel sub-agents are wanted. This needs a separate design for real-time child-event delivery, per-child usage attribution, cancellation of active children, and resource limits; the filesystem-safe classifier alone is not enough to certify Task concurrency.
 
 ---
 

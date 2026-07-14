@@ -44,7 +44,7 @@ export class NodePlatform implements Platform {
       : fromCwd;
   }
 
-  /** Returns the current working directory. Only place process.cwd() is called. */
+  /** Returns the Node process working directory; process access stays in this module. */
   cwd(): string {
     return process.cwd();
   }

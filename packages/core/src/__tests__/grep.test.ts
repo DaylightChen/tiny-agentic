@@ -15,8 +15,8 @@ import type { ToolCallContext } from "../types/tool.js";
  * is name-asc / deterministic.
  *
  * Returned file paths are formatted by the Platform. With NodePlatform, temp
- * fixtures outside platform.cwd() stay absolute. One case places a fixture under
- * that cwd to exercise NodePlatform's relative formatting branch.
+ * fixtures outside this NodePlatform's cwd stay absolute. One case places a
+ * fixture under that platform-owned cwd to exercise relative formatting.
  */
 const platform = new NodePlatform();
 const ctx: ToolCallContext = {};

@@ -1,4 +1,4 @@
-/** Explicit Node platform module for filesystem discovery used by NodePlatform. */
+/** Explicit Node platform module; owns native discovery traversal and ordering. */
 import { readdir, lstat, readFile, stat } from "node:fs/promises";
 import { join, relative, resolve, sep } from "node:path";
 import ignore from "ignore";

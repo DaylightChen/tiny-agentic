@@ -25,6 +25,7 @@ import {
   grepTool,
   type ApprovalHandler,
   type ToolCallContext,
+  type StopReason,
   type Usage,
 } from "tiny-agentic";
 import { AnthropicProvider } from "tiny-agentic/providers/anthropic";
@@ -33,6 +34,10 @@ import { NodePlatform } from "tiny-agentic/platform/node";
 function formatUsage(u: Usage): string {
   const cw = u.cacheWriteTokens !== undefined ? `, cacheWrite=${u.cacheWriteTokens}` : "";
   return `in=${u.inputTokens} out=${u.outputTokens} cacheRead=${u.cacheReadTokens}${cw}`;
+}
+
+function formatStopReason(reason: StopReason): string {
+  return reason.kind === "other" ? `other (raw=${JSON.stringify(reason.raw)})` : reason.kind;
 }
 
 // --- Keyless: direct grep timing (proves the sub-second target, no tokens) ---
@@ -99,6 +104,9 @@ for await (const event of agent.run(
     case "text_delta":
       process.stdout.write(event.text);
       break;
+    case "reasoning_delta":
+      process.stderr.write(event.text);
+      break;
     case "tool_use_start":
       console.log(`\n[calling: ${event.toolName}(${JSON.stringify(event.toolInput).slice(0, 120)})]`);
       break;
@@ -106,10 +114,19 @@ for await (const event of agent.run(
       console.log(`[result: isError=${event.isError}, result=${JSON.stringify(event.result).slice(0, 160)}]`);
       break;
     case "turn_complete":
-      if (event.usage) console.log(`[turn ${event.turnIndex} complete, usage: ${formatUsage(event.usage)}]`);
+      console.log(`[turn ${event.turnIndex} complete: ${formatStopReason(event.stopReason)}${event.usage ? `, usage: ${formatUsage(event.usage)}` : ""}]`);
       break;
+    case "subagent_event": {
+      const child = event.event;
+      if (child.type === "terminal" && child.reason === "agent_done") {
+        console.log(`[child ${event.taskId} done: ${formatStopReason(child.stopReason)}]`);
+      } else {
+        console.log(`[child ${event.taskId}: ${child.type}]`);
+      }
+      break;
+    }
     case "agent_done":
-      console.log(`\n[agent done — usage: ${formatUsage(event.usage)}]`);
+      console.log(`\n[agent done: ${formatStopReason(event.stopReason)} — usage: ${formatUsage(event.usage)}]`);
       break;
     case "agent_error":
       console.error("\n[agent error]", event.error.message);

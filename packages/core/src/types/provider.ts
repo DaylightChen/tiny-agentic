@@ -47,7 +47,7 @@ export type StopReason =
   | { kind: "model_context_window_exceeded"; raw: string | null }
   | { kind: "other"; raw: string | null };
 
-/** Canonical streaming events yielded by a provider. Provider-agnostic. */
+/** Canonical provider-agnostic stream, including required normalized completion reasons. */
 export type ProviderEvent =
   | { type: "text_delta";      text: string }
   | { type: "reasoning_delta"; text: string }

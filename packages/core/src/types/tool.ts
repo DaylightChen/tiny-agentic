@@ -98,8 +98,7 @@ export interface Tool<TInput extends ZodType = ZodType> {
    * violating the tool or Platform contract, including access to referenced
    * declaration-merged state in the shallow-copied context. Absence or false
    * makes the call a sequential barrier. Throwing produces an error barrier and
-   * skips approval
-   * and execution.
+   * skips approval and execution.
    */
   isConcurrencySafe?(input: z.infer<TInput>): boolean;
 }

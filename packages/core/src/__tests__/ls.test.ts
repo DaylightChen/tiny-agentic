@@ -11,7 +11,7 @@ import type { DirEntry } from "../types/platform.js";
  * boundary forbids node:fs in __tests__, so fixtures are built through the
  * platform's own primitives (exec/writeFile), mirroring fs-discovery.test.ts.
  *
- * Vitest sets NODE_ENV="test", so ls sorts name-asc deterministically.
+ * Vitest sets NODE_ENV="test", so NodePlatform returns name-ascending order.
  */
 const platform = new NodePlatform();
 const ctx: ToolCallContext = {};

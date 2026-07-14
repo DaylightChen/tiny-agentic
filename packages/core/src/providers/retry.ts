@@ -13,9 +13,9 @@ function defaultDelayMs(attempt: number): number {
 /**
  * Generic transient-error retry with exponential backoff + jitter.
  *
- * NOT used by AnthropicProvider in M1 — the Anthropic SDK retries internally
- * via the `maxRetries` constructor option (equivalent policy: backoff+jitter on
- * 429/5xx/connection, honors Retry-After). OpenAI SDK (M2) will do the same.
+ * Not used by AnthropicProvider or OpenAIProvider: both vendor SDKs retry
+ * internally via their `maxRetries` constructor option (backoff and jitter for
+ * transient rate-limit, server, and connection failures).
  *
  * Provided as a documented fallback for any future provider whose backend lacks
  * built-in retry. The caller supplies `isRetryable` to classify vendor-specific

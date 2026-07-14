@@ -19,6 +19,7 @@ import {
   Agent,
   createTaskTool,
   type ChildSpec,
+  type StopReason,
   type Usage,
 } from "tiny-agentic";
 import { AnthropicProvider } from "tiny-agentic/providers/anthropic";
@@ -36,6 +37,10 @@ const openaiKey = process.env["OPENAI_API_KEY"];
 function formatUsage(u: Usage): string {
   const cw = u.cacheWriteTokens !== undefined ? `, cacheWrite=${u.cacheWriteTokens}` : "";
   return `in=${u.inputTokens} out=${u.outputTokens} cacheRead=${u.cacheReadTokens}${cw}`;
+}
+
+function formatStopReason(reason: StopReason): string {
+  return reason.kind === "other" ? `other (raw=${JSON.stringify(reason.raw)})` : reason.kind;
 }
 
 const PARENT_MODEL = "claude-opus-4-8";
@@ -96,25 +101,43 @@ for await (const event of agent.run(
     case "text_delta":
       process.stdout.write(event.text);
       break;
+    case "reasoning_delta":
+      process.stderr.write(event.text);
+      break;
     case "tool_use_start":
       console.log(`\n[parent calls: ${event.toolName}(${JSON.stringify(event.toolInput).slice(0, 120)})]`);
       break;
     case "subagent_event": {
       const c = event.event;
-      if (c.type === "text_delta") process.stdout.write(`  [child ${event.taskId}] ${c.text}`);
-      else if (c.type === "tool_use_start") console.log(`  [child ${event.taskId}] tool: ${c.toolName}`);
-      else if (c.type === "tool_result") console.log(`  [child ${event.taskId}] tool_result (${c.toolName}, isError=${c.isError})`);
-      else if (c.type === "terminal") console.log(`  [child ${event.taskId}] terminal: ${c.reason} usage=${formatUsage(c.usage)}`);
+      switch (c.type) {
+        case "text_delta":
+          process.stdout.write(`  [child ${event.taskId}] ${c.text}`);
+          break;
+        case "reasoning_delta":
+          process.stderr.write(`  [child ${event.taskId} reasoning] ${c.text}`);
+          break;
+        case "tool_use_start":
+          console.log(`  [child ${event.taskId}] tool: ${c.toolName}`);
+          break;
+        case "tool_result":
+          console.log(`  [child ${event.taskId}] tool_result (${c.toolName}, isError=${c.isError})`);
+          break;
+        case "terminal": {
+          const stop = c.reason === "agent_done" ? ` stop=${formatStopReason(c.stopReason)}` : "";
+          console.log(`  [child ${event.taskId}] terminal: ${c.reason}${stop} usage=${formatUsage(c.usage)}`);
+          break;
+        }
+      }
       break;
     }
     case "tool_result":
       console.log(`\n[parent tool_result: isError=${event.isError}, result=${JSON.stringify(event.result).slice(0, 160)}]`);
       break;
     case "turn_complete":
-      if (event.usage) console.log(`[turn ${event.turnIndex} complete, usage: ${formatUsage(event.usage)}]`);
+      console.log(`[turn ${event.turnIndex} complete: ${formatStopReason(event.stopReason)}${event.usage ? `, usage: ${formatUsage(event.usage)}` : ""}]`);
       break;
     case "agent_done":
-      console.log(`\n[agent done — rolled-up usage (incl. child): ${formatUsage(event.usage)}]`);
+      console.log(`\n[agent done: ${formatStopReason(event.stopReason)} — rolled-up usage (incl. child): ${formatUsage(event.usage)}]`);
       break;
     case "agent_error":
       console.error("\n[agent error]", event.error.message);

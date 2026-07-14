@@ -218,8 +218,8 @@ async function executeBatch(
 }
 
 /**
- * Lazily prepares calls in model order, runs maximal approved safe batches, and
- * yields isolated attribution envelopes in input order across every barrier.
+ * Lazily prepares calls in model order. Approved safe calls form maximal batches;
+ * every other outcome is a barrier, and isolated envelopes always yield in input order.
  */
 export async function* runTools(
   toolUses: ToolUseEntry[],

@@ -11,8 +11,8 @@ import type { ToolCallContext } from "../types/tool.js";
  * __tests__). NODE_ENV="test" makes ordering name-asc/deterministic.
  *
  * Note: globTool delegates display formatting to the Platform. With NodePlatform,
- * temp fixtures outside platform.cwd() stay absolute; one dedicated case places
- * a fixture under that cwd to exercise NodePlatform's relative formatting branch.
+ * temp fixtures outside this NodePlatform's cwd stay absolute; one dedicated case
+ * places a fixture under that platform-owned cwd to exercise relative formatting.
  */
 const platform = new NodePlatform();
 const ctx: ToolCallContext = {};

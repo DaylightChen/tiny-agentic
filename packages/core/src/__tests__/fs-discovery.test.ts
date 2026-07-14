@@ -11,7 +11,7 @@ import { NodePlatform } from "../platform/node.js";
  * primitives — platform.exec("mkdir -p …" / "ln -s …" / "printf …") and
  * platform.writeFile — mirroring node.test.ts (task-01).
  *
- * Vitest sets NODE_ENV="test", so fs-discovery sorts name-asc deterministically.
+ * Vitest sets NODE_ENV="test", so NodePlatform discovery returns path-ascending order.
  */
 const platform = new NodePlatform();
 
