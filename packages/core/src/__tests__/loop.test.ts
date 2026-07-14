@@ -1,4 +1,4 @@
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, vi } from "vitest";
 import { z } from "zod";
 
 import { agentLoop } from "../loop/loop.js";
@@ -89,6 +89,34 @@ function makeParams(
     maxTurns: 10,
     signal: new AbortController().signal,
     ...overrides,
+  };
+}
+
+type Deferred<T = void> = {
+  promise: Promise<T>;
+  resolve: (value?: T) => void;
+  reject: (reason: unknown) => void;
+};
+
+function deferred<T = void>(): Deferred<T> {
+  let resolve!: (value?: T) => void;
+  let reject!: (reason: unknown) => void;
+  const promise = new Promise<T>((resolvePromise, rejectPromise) => {
+    resolve = (value) => resolvePromise(value as T);
+    reject = rejectPromise;
+  });
+  return { promise, resolve, reject };
+}
+
+function makeStartedLatch(expected: number): { started: () => void; allStarted: Promise<void> } {
+  const latch = deferred();
+  let count = 0;
+  return {
+    started: () => {
+      count += 1;
+      if (count === expected) latch.resolve();
+    },
+    allStarted: latch.promise,
   };
 }
 
@@ -474,6 +502,202 @@ describe("agentLoop", () => {
     expect(blocks.every((b) => b.type === "tool_result")).toBe(true);
     expect(blocks.map((b) => b.tool_use_id)).toEqual(["ta", "tb"]);
     expect(blocks.map((b) => b.content)).toEqual(["result-a", "result-b"]);
+  });
+
+  it("CB-11–CB-14: reverse-complete safe calls flush isolated child events, results, blocks, and usage in model order", async () => {
+    const gates = [deferred(), deferred()];
+    const started = makeStartedLatch(2);
+    const contexts: ToolCallContext[] = [];
+    const usage = [
+      { inputTokens: 2, outputTokens: 3, cacheReadTokens: 5 },
+      { inputTokens: 7, outputTokens: 11, cacheReadTokens: 13 },
+    ];
+    const safe = defineTool({
+      name: "safe_integrated",
+      description: "controlled concurrent loop integration",
+      inputSchema: z.object({ index: z.number() }),
+      isConcurrencySafe: () => true,
+      call: async ({ index }, _platform, context) => {
+        contexts.push(context);
+        context.emitEvent?.({ type: "text_delta", text: `child-${index}` });
+        context.reportUsage?.(usage[index]!);
+        started.started();
+        await gates[index]!.promise;
+        return `result-${index}`;
+      },
+    });
+    const provider = new MockProvider([
+      [
+        { type: "tool_use", id: "first-id", name: safe.name, input: { index: 0 } },
+        { type: "tool_use", id: "second-id", name: safe.name, input: { index: 1 } },
+        {
+          type: "message_stop",
+          stopReason: { kind: "tool_use", raw: "tool_use" },
+          usage: { inputTokens: 17, outputTokens: 19, cacheReadTokens: 23 },
+        },
+      ],
+      [
+        { type: "text_delta", text: "done" },
+        {
+          type: "message_stop",
+          stopReason: { kind: "end_turn", raw: "end_turn" },
+          usage: { inputTokens: 29, outputTokens: 31, cacheReadTokens: 37 },
+        },
+      ],
+    ]);
+    const collecting = collectEvents(agentLoop(makeParams(provider, new ToolRegistry([safe]))));
+
+    await started.allStarted;
+    gates[1]!.resolve();
+    await Promise.resolve();
+    gates[0]!.resolve();
+    const { events, terminal } = await collecting;
+
+    expect(contexts).toHaveLength(2);
+    expect(contexts[0]).not.toBe(contexts[1]);
+    expect(contexts.map(({ toolCallId }) => toolCallId)).toEqual(["first-id", "second-id"]);
+    const attributed = events.filter((event) =>
+      event.type === "subagent_event" || event.type === "tool_result"
+    );
+    expect(attributed.map((event) => event.type === "subagent_event"
+      ? [event.type, event.taskId, event.event.type === "text_delta" ? event.event.text : event.event.type]
+      : [event.type, event.toolCallId, event.result]
+    )).toEqual([
+      ["subagent_event", "first-id", "child-0"],
+      ["tool_result", "first-id", "result-0"],
+      ["subagent_event", "second-id", "child-1"],
+      ["tool_result", "second-id", "result-1"],
+    ]);
+    const secondRequest = provider.requests[1];
+    if (!secondRequest) throw new Error("expected second provider request");
+    const resultMessage = secondRequest.messages.at(-1);
+    if (!resultMessage || !Array.isArray(resultMessage.content)) throw new Error("expected result blocks");
+    const blocks = resultMessage.content as ToolResultBlock[];
+    expect(blocks.map(({ tool_use_id, content, is_error }) => [tool_use_id, content, is_error])).toEqual([
+      ["first-id", "result-0", false],
+      ["second-id", "result-1", false],
+    ]);
+    expect(terminal.usage).toEqual({
+      inputTokens: 55,
+      outputTokens: 64,
+      cacheReadTokens: 78,
+    });
+  });
+
+  it.each([
+    ["BigInt", () => ({ bad: 1n })],
+    ["circular", () => { const value: { self?: unknown } = {}; value.self = value; return value; }],
+  ])("CB-11: a %s serialization failure is call-local and preserves sibling order", async (_label, badResult) => {
+    const safe = defineTool({
+      name: "safe_serialization",
+      description: "returns controlled serializability",
+      inputSchema: z.object({ bad: z.boolean() }),
+      isConcurrencySafe: () => true,
+      call: async ({ bad }) => bad ? badResult() : "serializable sibling",
+    });
+    const provider = new MockProvider([
+      [
+        { type: "tool_use", id: "bad-id", name: safe.name, input: { bad: true } },
+        { type: "tool_use", id: "good-id", name: safe.name, input: { bad: false } },
+        { type: "message_stop", stopReason: { kind: "tool_use", raw: "tool_use" } },
+      ],
+      [{ type: "message_stop", stopReason: { kind: "stop_sequence", raw: "stop_sequence" } }],
+    ]);
+
+    const { events, terminal } = await collectEvents(
+      agentLoop(makeParams(provider, new ToolRegistry([safe]))),
+    );
+    const results = events.filter(
+      (event): event is Extract<AgentEvent, { type: "tool_result" }> => event.type === "tool_result",
+    );
+    expect(results.map(({ toolCallId, isError }) => [toolCallId, isError])).toEqual([
+      ["bad-id", false],
+      ["good-id", false],
+    ]);
+    const secondRequest = provider.requests[1];
+    if (!secondRequest) throw new Error("expected second provider request");
+    const resultMessage = secondRequest.messages.at(-1);
+    if (!resultMessage || !Array.isArray(resultMessage.content)) throw new Error("expected result blocks");
+    const blocks = resultMessage.content as ToolResultBlock[];
+    expect(blocks.map(({ tool_use_id, is_error }) => [tool_use_id, is_error])).toEqual([
+      ["bad-id", true],
+      ["good-id", false],
+    ]);
+    expect(blocks[0]?.content).toContain("could not serialize result");
+    expect(blocks[1]?.content).toBe("serializable sibling");
+    if (terminal.reason !== "agent_done") throw new Error("expected successful recovery");
+    expect(terminal.stopReason).toEqual({ kind: "stop_sequence", raw: "stop_sequence" });
+  });
+
+  it("CB-18 continuation: cancelled tool results pair before the already-aborted next provider turn becomes agent_error", async () => {
+    const controller = new AbortController();
+    const approvalStarted = deferred();
+    const approvalDecision = deferred<"allow">();
+    const toolCall = vi.fn().mockResolvedValue("must not run");
+    const safe = defineTool({
+      name: "approval_abort",
+      description: "aborted during approval",
+      inputSchema: z.object({}),
+      isConcurrencySafe: () => true,
+      call: toolCall,
+    });
+    class AbortAwareProvider implements Provider {
+      readonly requests: ProviderRequest[] = [];
+      readonly signals: AbortSignal[] = [];
+
+      async *stream(req: ProviderRequest, signal?: AbortSignal): AsyncGenerator<ProviderEvent> {
+        this.requests.push(req);
+        if (!signal) throw new Error("missing signal");
+        this.signals.push(signal);
+        if (this.requests.length === 1) {
+          yield { type: "tool_use", id: "cancel-id", name: safe.name, input: {} };
+          yield { type: "message_stop", stopReason: { kind: "tool_use", raw: "tool_use" } };
+          return;
+        }
+        if (!signal.aborted) throw new Error("expected already-aborted signal");
+        throw new DOMException("provider observed abort", "AbortError");
+      }
+    }
+    const provider = new AbortAwareProvider();
+    const approval = vi.fn(async () => {
+      approvalStarted.resolve();
+      return approvalDecision.promise;
+    });
+    const collecting = collectEvents(agentLoop(makeParams(provider, new ToolRegistry([safe]), {
+      signal: controller.signal,
+      approvalHandler: approval,
+    })));
+
+    await approvalStarted.promise;
+    controller.abort();
+    approvalDecision.resolve("allow");
+    const { events, terminal } = await collecting;
+
+    expect(toolCall).not.toHaveBeenCalled();
+    expect(events).toContainEqual({
+      type: "tool_result",
+      toolName: "approval_abort",
+      toolCallId: "cancel-id",
+      result: "Tool 'approval_abort': call cancelled before start",
+      isError: true,
+    });
+    expect(provider.requests).toHaveLength(2);
+    expect(provider.signals).toEqual([controller.signal, controller.signal]);
+    const secondRequest = provider.requests[1];
+    if (!secondRequest) throw new Error("expected second request");
+    const resultMessage = secondRequest.messages.at(-1);
+    if (!resultMessage || !Array.isArray(resultMessage.content)) throw new Error("expected result block");
+    expect(resultMessage.content).toEqual([{
+      type: "tool_result",
+      tool_use_id: "cancel-id",
+      content: "Tool 'approval_abort': call cancelled before start",
+      is_error: true,
+    }]);
+    expect(events.at(-1)?.type).toBe("agent_error");
+    expect(terminal.reason).toBe("agent_error");
+    if (terminal.reason !== "agent_error") throw new Error("expected agent_error");
+    expect(terminal.error.name).toBe("AbortError");
+    expect(terminal.error.message).toBe("provider observed abort");
   });
 
   it("surfaces each text_delta incrementally, all before turn_complete (7.18)", async () => {

@@ -19,4 +19,5 @@ export const readFileTool = defineTool({
     const slice = lines.slice(start, end);
     return { content: slice.join("\n"), offset: start + 1, lineCount: slice.length, totalLines: lines.length, truncated: slice.length < lines.length };
   },
+  isConcurrencySafe: () => true,
 });

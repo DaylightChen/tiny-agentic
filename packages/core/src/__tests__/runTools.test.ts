@@ -4,13 +4,16 @@ import { z } from "zod";
 import { runTools } from "../loop/runTools.js";
 import { bashTool } from "../tools/builtin/bash.js";
 import { editFileTool } from "../tools/builtin/editFile.js";
+import { globTool } from "../tools/builtin/glob.js";
+import { grepTool } from "../tools/builtin/grep.js";
+import { lsTool } from "../tools/builtin/ls.js";
 import { readFileTool } from "../tools/builtin/readFile.js";
 import { createTaskTool } from "../tools/builtin/task.js";
 import { writeFileTool } from "../tools/builtin/writeFile.js";
 import { ToolRegistry } from "../tools/registry.js";
 import { defineTool } from "../types/tool.js";
 import type { Tool, ToolCallContext } from "../types/tool.js";
-import type { Platform, ExecResult, ExecOptions } from "../types/platform.js";
+import type { Platform, DirEntry, ExecResult, ExecOptions } from "../types/platform.js";
 
 declare module "../types/tool.js" {
   interface ToolCallContext {
@@ -31,6 +34,7 @@ class MockPlatform implements Platform {
       readFile: (path: string) => Promise<string>;
       writeFile: (path: string, content: string) => Promise<void>;
       exec: (command: string, options?: ExecOptions) => Promise<ExecResult>;
+      listDir: (path: string) => Promise<DirEntry[]>;
     }> = {},
   ) {}
 
@@ -55,7 +59,8 @@ class MockPlatform implements Platform {
     if (this.overrides.exec) return this.overrides.exec(command, options);
     return Promise.reject(new Error("exec not configured"));
   }
-  listDir() {
+  listDir(path: string) {
+    if (this.overrides.listDir) return this.overrides.listDir(path);
     return Promise.reject(new Error("listDir not configured"));
   }
   stat() {
@@ -92,17 +97,17 @@ function toolResultAt(
   return execution.event;
 }
 
-type Deferred = {
-  promise: Promise<void>;
-  resolve: () => void;
+type Deferred<T = void> = {
+  promise: Promise<T>;
+  resolve: (value?: T) => void;
   reject: (reason: unknown) => void;
 };
 
-function deferred(): Deferred {
-  let resolve!: () => void;
+function deferred<T = void>(): Deferred<T> {
+  let resolve!: (value?: T) => void;
   let reject!: (reason: unknown) => void;
-  const promise = new Promise<void>((resolvePromise, rejectPromise) => {
-    resolve = resolvePromise;
+  const promise = new Promise<T>((resolvePromise, rejectPromise) => {
+    resolve = (value) => resolvePromise(value as T);
     reject = rejectPromise;
   });
   return { promise, resolve, reject };
@@ -318,6 +323,7 @@ describe("runTools — per-call attribution envelopes", () => {
   it("CB-12: gives each call a distinct context and local mutation cannot alter its sibling or base", async () => {
     const seenContexts: ToolCallContext[] = [];
     const seenIds: Array<string | undefined> = [];
+    const concurrentLatch = makeStartedLatch(2);
     const sharedService = { label: "shared" };
     const baseReportUsage = vi.fn();
     const baseEmitEvent = vi.fn();
@@ -333,6 +339,7 @@ describe("runTools — per-call attribution envelopes", () => {
       name: "inspect_context",
       description: "inspects per-call context",
       inputSchema: z.object({ mutate: z.boolean() }),
+      isConcurrencySafe: () => true,
       call: async ({ mutate }, _platform, context) => {
         seenContexts.push(context);
         seenIds.push(context.toolCallId);
@@ -344,6 +351,8 @@ describe("runTools — per-call attribution envelopes", () => {
           delete context.reportUsage;
           delete context.emitEvent;
         }
+        concurrentLatch.started();
+        await concurrentLatch.allStarted;
         return "ok";
       },
     });
@@ -384,6 +393,7 @@ describe("runTools — per-call attribution envelopes", () => {
       name: "retain_context",
       description: "retains and invokes callbacks",
       inputSchema: z.object({ call: z.number() }),
+      isConcurrencySafe: () => true,
       call: async ({ call }, _platform, context) => {
         if (call === 1) {
           staleContext = context;
@@ -409,11 +419,15 @@ describe("runTools — per-call attribution envelopes", () => {
       {},
     ));
 
+    staleContext?.emitEvent?.({ type: "text_delta", text: "stale-after-completion" });
+    staleContext?.reportUsage?.(staleUsage);
+
     expect(executions[0]?.childEvents).toEqual([
       { type: "text_delta", text: "first-live" },
       { type: "text_delta", text: "stale-late" },
+      { type: "text_delta", text: "stale-after-completion" },
     ]);
-    expect(executions[0]?.reportedUsage).toEqual([firstUsage, staleUsage]);
+    expect(executions[0]?.reportedUsage).toEqual([firstUsage, staleUsage, staleUsage]);
     expect(executions[1]?.childEvents).toEqual([{ type: "text_delta", text: "second-live" }]);
     expect(executions[1]?.reportedUsage).toEqual([secondUsage]);
     expect(executions[0]?.childEvents).not.toBe(executions[1]?.childEvents);
@@ -1086,16 +1100,276 @@ describe("runTools — safe-batch scheduler", () => {
     );
   });
 
-  it("keeps task, write/edit/bash, and read_file unmarked for Task 06", () => {
+  it("CB-4: marks exactly read_file, ls, glob, and grep safe among built-ins", () => {
     const taskTool = createTaskTool({
       resolveChild: () => { throw new Error("not invoked by marker inspection"); },
     });
 
-    expect(taskTool.isConcurrencySafe).toBeUndefined();
-    expect(writeFileTool.isConcurrencySafe).toBeUndefined();
-    expect(editFileTool.isConcurrencySafe).toBeUndefined();
-    expect(bashTool.isConcurrencySafe).toBeUndefined();
-    expect(readFileTool.isConcurrencySafe).toBeUndefined();
+    for (const tool of [readFileTool, lsTool, globTool, grepTool]) {
+      expect(tool.isConcurrencySafe?.({} as never), tool.name).toBe(true);
+    }
+    for (const tool of [writeFileTool, editFileTool, bashTool, taskTool]) {
+      expect(tool.isConcurrencySafe, tool.name).toBeUndefined();
+    }
+  });
+});
+
+describe("runTools — cancellation", () => {
+  const cancellation = (id: string, name: string) => ({
+    type: "tool_result" as const,
+    toolName: name,
+    toolCallId: id,
+    result: `Tool '${name}': call cancelled before start`,
+    isError: true,
+  });
+
+  it("CB-17: a pre-aborted run skips lookup, classification, approval, and calls while preserving every provider entry", async () => {
+    const controller = new AbortController();
+    controller.abort();
+    const classifier = vi.fn(() => true);
+    const call = vi.fn().mockResolvedValue("must not run");
+    const approval = vi.fn().mockResolvedValue("allow");
+    const tool = defineTool({
+      name: "known",
+      description: "known safe tool",
+      inputSchema: z.object({}),
+      isConcurrencySafe: classifier,
+      call,
+    });
+    const registry = makeRegistry([tool]);
+    const lookup = vi.spyOn(registry, "findByName");
+
+    const executions = await collect(runTools(
+      [
+        { id: "known-id", name: "known", input: {} },
+        { id: "missing-id", name: "missing", input: {}, parseError: true },
+      ],
+      registry,
+      new MockPlatform(),
+      { signal: controller.signal },
+      approval,
+    ));
+
+    expect(executions.map(({ event }) => event)).toEqual([
+      cancellation("known-id", "known"),
+      cancellation("missing-id", "missing"),
+    ]);
+    expect(lookup).not.toHaveBeenCalled();
+    expect(classifier).not.toHaveBeenCalled();
+    expect(approval).not.toHaveBeenCalled();
+    expect(call).not.toHaveBeenCalled();
+  });
+
+  it("CB-18: abort during serial approval cancels the approved-but-unstarted call and all remaining calls", async () => {
+    const controller = new AbortController();
+    const approvalStarted = deferred();
+    const approvalDecision = deferred<"allow">();
+    const firstCall = vi.fn().mockResolvedValue("must not run");
+    const laterClassifier = vi.fn(() => true);
+    const laterCall = vi.fn().mockResolvedValue("must not run");
+    const first = defineTool({
+      name: "approval_wait",
+      description: "approval waits",
+      inputSchema: z.object({}),
+      isConcurrencySafe: () => true,
+      call: firstCall,
+    });
+    const later = defineTool({
+      name: "later",
+      description: "must remain untouched",
+      inputSchema: z.object({}),
+      isConcurrencySafe: laterClassifier,
+      call: laterCall,
+    });
+    const registry = makeRegistry([first, later]);
+    const lookup = vi.spyOn(registry, "findByName");
+    const approval = vi.fn(async () => {
+      approvalStarted.resolve();
+      return approvalDecision.promise;
+    });
+    const collecting = collect(runTools(
+      [
+        { id: "approved", name: first.name, input: {} },
+        { id: "later-id", name: later.name, input: {} },
+      ],
+      registry,
+      new MockPlatform(),
+      { signal: controller.signal },
+      approval,
+    ));
+
+    await approvalStarted.promise;
+    controller.abort();
+    approvalDecision.resolve("allow");
+    const executions = await collecting;
+
+    expect(executions.map(({ event }) => event)).toEqual([
+      cancellation("approved", "approval_wait"),
+      cancellation("later-id", "later"),
+    ]);
+    expect(lookup.mock.calls.map(([name]) => name)).toEqual(["approval_wait"]);
+    expect(approval).toHaveBeenCalledOnce();
+    expect(firstCall).not.toHaveBeenCalled();
+    expect(laterClassifier).not.toHaveBeenCalled();
+    expect(laterCall).not.toHaveBeenCalled();
+  });
+
+  it("CB-16: aborts an active safe batch honestly, awaits all starts, and never crosses the following barrier", async () => {
+    const controller = new AbortController();
+    const gates = [deferred(), deferred()];
+    const latch = makeStartedLatch(2);
+    const seenContexts: ToolCallContext[] = [];
+    const safe = defineTool({
+      name: "active_safe",
+      description: "controlled active work",
+      inputSchema: z.object({ index: z.number() }),
+      isConcurrencySafe: () => true,
+      call: async ({ index }, _platform, context) => {
+        seenContexts.push(context);
+        latch.started();
+        await gates[index]!.promise;
+        expect(context.signal?.aborted).toBe(true);
+        return `active-${index}`;
+      },
+    });
+    const barrierClassifier = vi.fn(() => false);
+    const barrierCall = vi.fn().mockResolvedValue("must not run");
+    const barrier = defineTool({
+      name: "following_barrier",
+      description: "must not start",
+      inputSchema: z.object({}),
+      isConcurrencySafe: barrierClassifier,
+      call: barrierCall,
+    });
+    const untouchedClassifier = vi.fn(() => true);
+    const untouchedCall = vi.fn().mockResolvedValue("must not run");
+    const untouched = defineTool({
+      name: "remaining_safe",
+      description: "must not be inspected",
+      inputSchema: z.object({}),
+      isConcurrencySafe: untouchedClassifier,
+      call: untouchedCall,
+    });
+    const registry = makeRegistry([safe, barrier, untouched]);
+    const lookup = vi.spyOn(registry, "findByName");
+    let settled = false;
+    const collecting = collect(runTools(
+      [
+        { id: "active-a", name: safe.name, input: { index: 0 } },
+        { id: "active-b", name: safe.name, input: { index: 1 } },
+        { id: "barrier", name: barrier.name, input: {} },
+        { id: "remaining", name: untouched.name, input: {} },
+      ],
+      registry,
+      new MockPlatform(),
+      { signal: controller.signal },
+    )).finally(() => { settled = true; });
+
+    await latch.allStarted;
+    controller.abort();
+    gates[1]!.resolve();
+    await Promise.resolve();
+    expect(settled).toBe(false);
+    gates[0]!.resolve();
+    const executions = await collecting;
+
+    expect(seenContexts).toHaveLength(2);
+    expect(seenContexts[0]).not.toBe(seenContexts[1]);
+    expect(seenContexts[0]?.signal).toBe(controller.signal);
+    expect(seenContexts[1]?.signal).toBe(controller.signal);
+    expect(executions.map(({ event }) => event)).toEqual([
+      expect.objectContaining({ toolCallId: "active-a", result: "active-0", isError: false }),
+      expect.objectContaining({ toolCallId: "active-b", result: "active-1", isError: false }),
+      cancellation("barrier", "following_barrier"),
+      cancellation("remaining", "remaining_safe"),
+    ]);
+    expect(lookup.mock.calls.map(([name]) => name)).toEqual([
+      "active_safe",
+      "active_safe",
+      "following_barrier",
+    ]);
+    expect(barrierClassifier).toHaveBeenCalledOnce();
+    expect(barrierCall).not.toHaveBeenCalled();
+    expect(untouchedClassifier).not.toHaveBeenCalled();
+    expect(untouchedCall).not.toHaveBeenCalled();
+  });
+
+  it("PT-12: pre-aborted read_file and ls do not invoke Platform methods", async () => {
+    const controller = new AbortController();
+    controller.abort();
+    const read = vi.fn().mockResolvedValue("content");
+    const list = vi.fn().mockResolvedValue([]);
+
+    const executions = await collect(runTools(
+      [
+        { id: "read-id", name: "read_file", input: { path: "/f" } },
+        { id: "list-id", name: "ls", input: { path: "/d" } },
+      ],
+      makeRegistry([readFileTool, lsTool]),
+      new MockPlatform({ readFile: read, listDir: list }),
+      { signal: controller.signal },
+    ));
+
+    expect(executions.map(({ event }) => event)).toEqual([
+      cancellation("read-id", "read_file"),
+      cancellation("list-id", "ls"),
+    ]);
+    expect(read).not.toHaveBeenCalled();
+    expect(list).not.toHaveBeenCalled();
+  });
+
+  it("PT-12: active read_file and ls see abort but settle only with their deferred Platform promises", async () => {
+    const controller = new AbortController();
+    const readResult = deferred<string>();
+    const listResult = deferred<DirEntry[]>();
+    const bothStarted = makeStartedLatch(2);
+    const read = vi.fn(() => {
+      bothStarted.started();
+      return readResult.promise;
+    });
+    const list = vi.fn(() => {
+      bothStarted.started();
+      return listResult.promise;
+    });
+    let settled = false;
+    const collecting = collect(runTools(
+      [
+        { id: "read-id", name: "read_file", input: { path: "/f" } },
+        { id: "list-id", name: "ls", input: { path: "/d" } },
+      ],
+      makeRegistry([readFileTool, lsTool]),
+      new MockPlatform({ readFile: read, listDir: list }),
+      { signal: controller.signal },
+    )).finally(() => { settled = true; });
+
+    await bothStarted.allStarted;
+    controller.abort();
+    await Promise.resolve();
+    expect(settled).toBe(false);
+    readResult.resolve("file contents");
+    await Promise.resolve();
+    expect(settled).toBe(false);
+    listResult.reject(new Error("list finished after abort"));
+
+    const executions = await collecting;
+    expect(executions.map(({ event }) => event)).toEqual([
+      {
+        type: "tool_result",
+        toolName: "read_file",
+        toolCallId: "read-id",
+        result: { content: "file contents" },
+        isError: false,
+      },
+      {
+        type: "tool_result",
+        toolName: "ls",
+        toolCallId: "list-id",
+        result: "list finished after abort",
+        isError: true,
+      },
+    ]);
+    expect(read).toHaveBeenCalledOnce();
+    expect(list).toHaveBeenCalledOnce();
   });
 });
 

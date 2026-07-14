@@ -33,6 +33,31 @@ function emptyExecution(event: ToolResultEvent): ToolExecution {
   return { event, childEvents: [], reportedUsage: [] };
 }
 
+function cancelledExecution(toolUse: ToolUseEntry): ToolExecution {
+  return emptyExecution({
+    type: "tool_result",
+    toolName: toolUse.name,
+    toolCallId: toolUse.id,
+    result: `Tool '${toolUse.name}': call cancelled before start`,
+    isError: true,
+  });
+}
+
+function isAborted(signal: AbortSignal | undefined): boolean {
+  return signal?.aborted === true;
+}
+
+function unstartedCancellations(
+  safeBatch: PreparedExecution[],
+  toolUses: ToolUseEntry[],
+  index: number,
+): ToolExecution[] {
+  return [
+    ...safeBatch.map((prepared) => cancelledExecution(prepared.toolUse)),
+    ...toolUses.slice(index).map(cancelledExecution),
+  ];
+}
+
 function prepareExecution(
   toolUse: ToolUseEntry,
   tool: Tool,
@@ -158,15 +183,38 @@ function rejectedExecution(
 async function executeBatch(
   batch: PreparedExecution[],
   platform: Platform,
+  signal: AbortSignal | undefined,
 ): Promise<ToolExecution[]> {
-  const promises = batch.map((prepared) => executePrepared(prepared, platform));
-  const settlements = await Promise.allSettled(promises);
+  const executions: Array<ToolExecution | undefined> = new Array(batch.length);
+  const startedIndexes: number[] = [];
+  const promises: Promise<ToolExecution>[] = [];
+  let cancellationObserved = false;
 
-  return settlements.map((settlement, index) => {
-    if (settlement.status === "fulfilled") return settlement.value;
+  for (let index = 0; index < batch.length; index++) {
     const prepared = batch[index]!;
-    return rejectedExecution(prepared, settlement.reason);
-  });
+    if (cancellationObserved || isAborted(signal)) {
+      cancellationObserved = true;
+      executions[index] = cancelledExecution(prepared.toolUse);
+      continue;
+    }
+
+    startedIndexes.push(index);
+    promises.push(executePrepared(prepared, platform));
+  }
+
+  const settlements = await Promise.allSettled(promises);
+  for (let index = 0; index < settlements.length; index++) {
+    const settlement = settlements[index]!;
+    const batchIndex = startedIndexes[index]!;
+    const prepared = batch[batchIndex]!;
+    executions[batchIndex] = settlement.status === "fulfilled"
+      ? settlement.value
+      : rejectedExecution(prepared, settlement.reason);
+  }
+
+  return batch.map((prepared, index) =>
+    executions[index] ?? cancelledExecution(prepared.toolUse)
+  );
 }
 
 /**
@@ -184,103 +232,142 @@ export async function* runTools(
   let safeBatch: PreparedExecution[] = [];
 
   while (index < toolUses.length) {
+    if (isAborted(baseContext.signal)) {
+      for (const execution of unstartedCancellations(safeBatch, toolUses, index)) {
+        yield execution;
+      }
+      return;
+    }
+
     const toolUse = toolUses[index];
     if (toolUse === undefined) break;
 
     const tool = registry.findByName(toolUse.name);
+    let preparationError: ToolExecution | undefined;
+    let prepared: PreparedExecution | undefined;
 
     if (tool === undefined) {
-      if (safeBatch.length > 0) {
-        const executions = await executeBatch(safeBatch, platform);
-        safeBatch = [];
-        for (const execution of executions) yield execution;
-      }
-      yield emptyExecution({
+      preparationError = emptyExecution({
         type: "tool_result",
         toolName: toolUse.name,
         toolCallId: toolUse.id,
         result: `Unknown tool: '${toolUse.name}'`,
         isError: true,
       });
-      index += 1;
-      continue;
-    }
-
-    if (toolUse.parseError) {
-      if (safeBatch.length > 0) {
-        const executions = await executeBatch(safeBatch, platform);
-        safeBatch = [];
-        for (const execution of executions) yield execution;
-      }
-      yield emptyExecution({
+    } else if (toolUse.parseError) {
+      preparationError = emptyExecution({
         type: "tool_result",
         toolName: tool.name,
         toolCallId: toolUse.id,
         result: `Tool '${tool.name}': could not parse tool input as JSON`,
         isError: true,
       });
-      index += 1;
-      continue;
-    }
+    } else {
+      const parseResult = tool.inputSchema.safeParse(toolUse.input);
+      if (!parseResult.success) {
+        preparationError = emptyExecution({
+          type: "tool_result",
+          toolName: tool.name,
+          toolCallId: toolUse.id,
+          result: `Tool '${tool.name}': invalid input — ${parseResult.error.message}`,
+          isError: true,
+        });
+      } else {
+        let concurrencySafe: boolean | undefined;
+        try {
+          concurrencySafe = tool.isConcurrencySafe?.(parseResult.data) === true;
+        } catch (err) {
+          preparationError = emptyExecution({
+            type: "tool_result",
+            toolName: tool.name,
+            toolCallId: toolUse.id,
+            result: `Tool '${tool.name}': concurrency safety check failed — ${err instanceof Error ? err.message : String(err)}`,
+            isError: true,
+          });
+        }
 
-    const parseResult = tool.inputSchema.safeParse(toolUse.input);
-    if (!parseResult.success) {
-      if (safeBatch.length > 0) {
-        const executions = await executeBatch(safeBatch, platform);
-        safeBatch = [];
-        for (const execution of executions) yield execution;
+        if (concurrencySafe !== undefined) {
+          prepared = prepareExecution(
+            toolUse,
+            tool,
+            parseResult.data,
+            concurrencySafe,
+            baseContext,
+          );
+        }
       }
-      yield emptyExecution({
-        type: "tool_result",
-        toolName: tool.name,
-        toolCallId: toolUse.id,
-        result: `Tool '${tool.name}': invalid input — ${parseResult.error.message}`,
-        isError: true,
-      });
-      index += 1;
-      continue;
     }
 
-    let concurrencySafe: boolean;
-    try {
-      concurrencySafe = tool.isConcurrencySafe?.(parseResult.data) === true;
-    } catch (err) {
+    if (preparationError !== undefined) {
       if (safeBatch.length > 0) {
-        const executions = await executeBatch(safeBatch, platform);
+        if (isAborted(baseContext.signal)) {
+          for (const execution of unstartedCancellations(safeBatch, toolUses, index)) {
+            yield execution;
+          }
+          return;
+        }
+
+        const batch = safeBatch;
         safeBatch = [];
+        const executions = await executeBatch(batch, platform, baseContext.signal);
         for (const execution of executions) yield execution;
+
+        if (isAborted(baseContext.signal)) {
+          for (const execution of toolUses.slice(index).map(cancelledExecution)) {
+            yield execution;
+          }
+          return;
+        }
       }
-      yield emptyExecution({
-        type: "tool_result",
-        toolName: tool.name,
-        toolCallId: toolUse.id,
-        result: `Tool '${tool.name}': concurrency safety check failed — ${err instanceof Error ? err.message : String(err)}`,
-        isError: true,
-      });
+
+      yield preparationError;
       index += 1;
       continue;
     }
 
-    const prepared = prepareExecution(
-      toolUse,
-      tool,
-      parseResult.data,
-      concurrencySafe,
-      baseContext,
-    );
+    if (prepared === undefined) break;
 
     if (!prepared.concurrencySafe) {
       if (safeBatch.length > 0) {
-        const executions = await executeBatch(safeBatch, platform);
+        if (isAborted(baseContext.signal)) {
+          for (const execution of unstartedCancellations(safeBatch, toolUses, index)) {
+            yield execution;
+          }
+          return;
+        }
+
+        const batch = safeBatch;
         safeBatch = [];
+        const executions = await executeBatch(batch, platform, baseContext.signal);
         for (const execution of executions) yield execution;
+
+        if (isAborted(baseContext.signal)) {
+          for (const execution of toolUses.slice(index).map(cancelledExecution)) {
+            yield execution;
+          }
+          return;
+        }
       }
 
       const approvalError = await approvePrepared(prepared, approvalHandler);
+      if (isAborted(baseContext.signal)) {
+        for (const execution of toolUses.slice(index).map(cancelledExecution)) {
+          yield execution;
+        }
+        return;
+      }
+
       if (approvalError !== undefined) {
         yield approvalError;
       } else {
-        const executions = await executeBatch([prepared], platform);
+        if (isAborted(baseContext.signal)) {
+          for (const execution of toolUses.slice(index).map(cancelledExecution)) {
+            yield execution;
+          }
+          return;
+        }
+
+        const executions = await executeBatch([prepared], platform, baseContext.signal);
         const execution = executions[0];
         if (execution !== undefined) yield execution;
       }
@@ -289,12 +376,35 @@ export async function* runTools(
     }
 
     const approvalError = await approvePrepared(prepared, approvalHandler);
+    if (isAborted(baseContext.signal)) {
+      for (const execution of unstartedCancellations(safeBatch, toolUses, index)) {
+        yield execution;
+      }
+      return;
+    }
+
     if (approvalError !== undefined) {
       if (safeBatch.length > 0) {
-        const executions = await executeBatch(safeBatch, platform);
+        if (isAborted(baseContext.signal)) {
+          for (const execution of unstartedCancellations(safeBatch, toolUses, index)) {
+            yield execution;
+          }
+          return;
+        }
+
+        const batch = safeBatch;
         safeBatch = [];
+        const executions = await executeBatch(batch, platform, baseContext.signal);
         for (const execution of executions) yield execution;
+
+        if (isAborted(baseContext.signal)) {
+          for (const execution of toolUses.slice(index).map(cancelledExecution)) {
+            yield execution;
+          }
+          return;
+        }
       }
+
       yield approvalError;
       index += 1;
       continue;
@@ -305,7 +415,14 @@ export async function* runTools(
   }
 
   if (safeBatch.length > 0) {
-    const executions = await executeBatch(safeBatch, platform);
+    if (isAborted(baseContext.signal)) {
+      for (const execution of safeBatch.map((prepared) => cancelledExecution(prepared.toolUse))) {
+        yield execution;
+      }
+      return;
+    }
+
+    const executions = await executeBatch(safeBatch, platform, baseContext.signal);
     for (const execution of executions) yield execution;
   }
 }
