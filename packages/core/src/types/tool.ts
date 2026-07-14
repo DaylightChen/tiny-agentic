@@ -92,9 +92,14 @@ export interface Tool<TInput extends ZodType = ZodType> {
   ): Promise<unknown>;
 
   /**
-   * Optional concurrency hint. When present and returns true, the tool is
-   * safe to run concurrently with other concurrency-safe tools in the same turn.
-   * Unused in M1 (all tools run sequentially). Hook for M2.
+   * Synchronous concurrency classifier invoked once after successful validation
+   * and before approval. It must be pure, deterministic, and side-effect-free.
+   * Returning true certifies that this call may overlap other safe calls without
+   * violating the tool or Platform contract, including access to referenced
+   * declaration-merged state in the shallow-copied context. Absence or false
+   * makes the call a sequential barrier. Throwing produces an error barrier and
+   * skips approval
+   * and execution.
    */
   isConcurrencySafe?(input: z.infer<TInput>): boolean;
 }

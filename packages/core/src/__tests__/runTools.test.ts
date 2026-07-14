@@ -2,6 +2,11 @@ import { describe, it, expect, vi } from "vitest";
 import { z } from "zod";
 
 import { runTools } from "../loop/runTools.js";
+import { bashTool } from "../tools/builtin/bash.js";
+import { editFileTool } from "../tools/builtin/editFile.js";
+import { readFileTool } from "../tools/builtin/readFile.js";
+import { createTaskTool } from "../tools/builtin/task.js";
+import { writeFileTool } from "../tools/builtin/writeFile.js";
 import { ToolRegistry } from "../tools/registry.js";
 import { defineTool } from "../types/tool.js";
 import type { Tool, ToolCallContext } from "../types/tool.js";
@@ -85,6 +90,34 @@ function toolResultAt(
   const execution = executions[index];
   if (!execution) throw new Error(`no execution at index ${index}`);
   return execution.event;
+}
+
+type Deferred = {
+  promise: Promise<void>;
+  resolve: () => void;
+  reject: (reason: unknown) => void;
+};
+
+function deferred(): Deferred {
+  let resolve!: () => void;
+  let reject!: (reason: unknown) => void;
+  const promise = new Promise<void>((resolvePromise, rejectPromise) => {
+    resolve = resolvePromise;
+    reject = rejectPromise;
+  });
+  return { promise, resolve, reject };
+}
+
+function makeStartedLatch(expected: number): { started: () => void; allStarted: Promise<void> } {
+  const latch = deferred();
+  let count = 0;
+  return {
+    started: () => {
+      count += 1;
+      if (count === expected) latch.resolve();
+    },
+    allStarted: latch.promise,
+  };
 }
 
 describe("runTools", () => {
@@ -387,22 +420,21 @@ describe("runTools — per-call attribution envelopes", () => {
     expect(executions[0]?.reportedUsage).not.toBe(executions[1]?.reportedUsage);
   });
 
-  it("CB-15: does not classify or Promise-batch calls and starts the second only after the first settles", async () => {
-    let releaseFirst: (() => void) | undefined;
+  it("CB-15: keeps unmarked Task-like calls sequential", async () => {
+    const firstGate = deferred();
+    const firstStarted = deferred();
     let firstSettled = false;
     let secondStarted = false;
-    const firstGate = new Promise<void>((resolve) => { releaseFirst = resolve; });
-    const classifier = vi.fn(() => true);
     const order: string[] = [];
 
     const first = defineTool({
       name: "task_like_first",
       description: "unmarked Task-like call",
       inputSchema: z.object({}),
-      isConcurrencySafe: classifier,
       call: async () => {
         order.push("first:start");
-        await firstGate;
+        firstStarted.resolve();
+        await firstGate.promise;
         firstSettled = true;
         order.push("first:end");
         return "first";
@@ -412,7 +444,6 @@ describe("runTools — per-call attribution envelopes", () => {
       name: "task_like_second",
       description: "unmarked Task-like call",
       inputSchema: z.object({}),
-      isConcurrencySafe: classifier,
       call: async () => {
         secondStarted = true;
         order.push("second:start");
@@ -430,15 +461,12 @@ describe("runTools — per-call attribution envelopes", () => {
       new MockPlatform(),
       {},
     ));
-    await Promise.resolve();
-    await Promise.resolve();
+    await firstStarted.promise;
 
     expect(secondStarted).toBe(false);
-    expect(classifier).not.toHaveBeenCalled();
-    releaseFirst?.();
+    firstGate.resolve();
     await collecting;
     expect(order).toEqual(["first:start", "first:end", "second:start"]);
-    expect(classifier).not.toHaveBeenCalled();
   });
 
   it("does not leak an early-return tool-use id into a later executable call", async () => {
@@ -466,6 +494,608 @@ describe("runTools — per-call attribution envelopes", () => {
 
     expect(seenBySecond).toBe("second-2");
     expect("toolCallId" in baseContext).toBe(false);
+  });
+});
+
+describe("runTools — safe-batch scheduler", () => {
+  it("CB-1/CB-2: starts a safe batch together and preserves model order after reverse completion", async () => {
+    const gates = [deferred(), deferred()];
+    const latch = makeStartedLatch(2);
+    const tool = defineTool({
+      name: "safe_deferred",
+      description: "controlled safe work",
+      inputSchema: z.object({ index: z.number() }),
+      isConcurrencySafe: () => true,
+      call: async ({ index }) => {
+        latch.started();
+        await gates[index]!.promise;
+        return `result-${index}`;
+      },
+    });
+
+    let collectionSettled = false;
+    const collecting = collect(runTools(
+      [
+        { id: "first", name: tool.name, input: { index: 0 } },
+        { id: "second", name: tool.name, input: { index: 1 } },
+      ],
+      makeRegistry([tool]),
+      new MockPlatform(),
+      {},
+    )).finally(() => { collectionSettled = true; });
+
+    await latch.allStarted;
+    gates[1]!.resolve();
+    await Promise.resolve();
+    expect(collectionSettled).toBe(false);
+    gates[0]!.resolve();
+
+    const executions = await collecting;
+    expect(executions.map(({ event }) => [event.toolCallId, event.result])).toEqual([
+      ["first", "result-0"],
+      ["second", "result-1"],
+    ]);
+  });
+
+  it("CB-3: treats safe → classifier-false → safe as temporal barriers", async () => {
+    const safeBeforeGate = deferred();
+    const unsafeGate = deferred();
+    const safeAfterGate = deferred();
+    const safeBeforeStarted = deferred();
+    const unsafeStarted = deferred();
+    const safeAfterStarted = deferred();
+    const order: string[] = [];
+
+    const tool = defineTool({
+      name: "conditional_safety",
+      description: "safe only when marked",
+      inputSchema: z.object({ kind: z.enum(["safe-before", "unsafe", "safe-after"]) }),
+      isConcurrencySafe: ({ kind }) => kind !== "unsafe",
+      call: async ({ kind }) => {
+        order.push(`${kind}:start`);
+        if (kind === "safe-before") {
+          safeBeforeStarted.resolve();
+          await safeBeforeGate.promise;
+        } else if (kind === "unsafe") {
+          unsafeStarted.resolve();
+          await unsafeGate.promise;
+        } else {
+          safeAfterStarted.resolve();
+          await safeAfterGate.promise;
+        }
+        order.push(`${kind}:end`);
+        return kind;
+      },
+    });
+
+    const collecting = collect(runTools(
+      [
+        { id: "one", name: tool.name, input: { kind: "safe-before" } },
+        { id: "two", name: tool.name, input: { kind: "unsafe" } },
+        { id: "three", name: tool.name, input: { kind: "safe-after" } },
+      ],
+      makeRegistry([tool]),
+      new MockPlatform(),
+      {},
+    ));
+
+    await safeBeforeStarted.promise;
+    expect(order).toEqual(["safe-before:start"]);
+    safeBeforeGate.resolve();
+    await unsafeStarted.promise;
+    expect(order).toEqual(["safe-before:start", "safe-before:end", "unsafe:start"]);
+    unsafeGate.resolve();
+    await safeAfterStarted.promise;
+    expect(order).toEqual([
+      "safe-before:start",
+      "safe-before:end",
+      "unsafe:start",
+      "unsafe:end",
+      "safe-after:start",
+    ]);
+    safeAfterGate.resolve();
+
+    const executions = await collecting;
+    expect(executions.map(({ event }) => event.toolCallId)).toEqual(["one", "two", "three"]);
+  });
+
+  it.each([
+    {
+      label: "unknown",
+      barrier: { id: "barrier", name: "missing_tool", input: {} },
+      expected: "Unknown tool: 'missing_tool'",
+    },
+    {
+      label: "provider parse-invalid",
+      barrier: { id: "barrier", name: "barrier_tool", input: {}, parseError: true },
+      expected: "Tool 'barrier_tool': could not parse tool input as JSON",
+    },
+    {
+      label: "Zod-invalid",
+      barrier: { id: "barrier", name: "barrier_tool", input: { value: "wrong" } },
+      expected: undefined,
+    },
+  ])("CB-5: $label is an immediate barrier with no look-ahead", async ({ barrier, expected }) => {
+    const beforeGate = deferred();
+    const afterGate = deferred();
+    const beforeStarted = deferred();
+    const afterStarted = deferred();
+    const afterClassifier = vi.fn(() => true);
+    const schema = z.object({ value: z.number() });
+    const safeBefore = defineTool({
+      name: "safe_before_immediate_barrier",
+      description: "safe before barrier",
+      inputSchema: z.object({}),
+      isConcurrencySafe: () => true,
+      call: async () => {
+        beforeStarted.resolve();
+        await beforeGate.promise;
+        return "before";
+      },
+    });
+    const barrierTool = defineTool({
+      name: "barrier_tool",
+      description: "validation barrier",
+      inputSchema: schema,
+      isConcurrencySafe: () => true,
+      call: vi.fn().mockResolvedValue("must not run"),
+    });
+    const safeAfter = defineTool({
+      name: "safe_after_immediate_barrier",
+      description: "safe after barrier",
+      inputSchema: z.object({}),
+      isConcurrencySafe: afterClassifier,
+      call: async () => {
+        afterStarted.resolve();
+        await afterGate.promise;
+        return "after";
+      },
+    });
+    const registry = makeRegistry([safeBefore, barrierTool, safeAfter]);
+    const findByName = vi.spyOn(registry, "findByName");
+    const gen = runTools(
+      [
+        { id: "before", name: safeBefore.name, input: {} },
+        barrier,
+        { id: "after", name: safeAfter.name, input: {} },
+      ],
+      registry,
+      new MockPlatform(),
+      {},
+    );
+
+    const beforeResultPromise = gen.next();
+    await beforeStarted.promise;
+    expect(findByName.mock.calls.map(([name]) => name)).toEqual([
+      safeBefore.name,
+      barrier.name,
+    ]);
+    expect(afterClassifier).not.toHaveBeenCalled();
+    beforeGate.resolve();
+    expect((await beforeResultPromise).value?.event.toolCallId).toBe("before");
+    expect(findByName.mock.calls.map(([name]) => name)).toEqual([
+      safeBefore.name,
+      barrier.name,
+    ]);
+
+    const barrierResult = await gen.next();
+    expect(barrierResult.value?.event.result).toBe(
+      expected ?? `Tool 'barrier_tool': invalid input — ${schema.safeParse(barrier.input).error?.message}`,
+    );
+    expect(findByName.mock.calls.map(([name]) => name)).toEqual([
+      safeBefore.name,
+      barrier.name,
+    ]);
+    expect(afterClassifier).not.toHaveBeenCalled();
+
+    const afterResultPromise = gen.next();
+    await afterStarted.promise;
+    expect(findByName.mock.calls.map(([name]) => name)).toEqual([
+      safeBefore.name,
+      barrier.name,
+      safeAfter.name,
+    ]);
+    expect(afterClassifier).toHaveBeenCalledOnce();
+    afterGate.resolve();
+    expect((await afterResultPromise).value?.event.toolCallId).toBe("after");
+    expect((await gen.next()).done).toBe(true);
+  });
+
+  it("CB-6: invokes approvals serially and makes denial and approval throw barriers", async () => {
+    let resolveFirstApproval!: (decision: "allow" | "deny") => void;
+    let resolveSecondApproval!: (decision: "allow" | "deny") => void;
+    const firstApproval = new Promise<"allow" | "deny">((resolve) => { resolveFirstApproval = resolve; });
+    const secondApproval = new Promise<"allow" | "deny">((resolve) => { resolveSecondApproval = resolve; });
+    const firstApprovalStarted = deferred();
+    const secondApprovalStarted = deferred();
+    const firstCallGate = deferred();
+    const firstCallStarted = deferred();
+    const fourthCallStarted = deferred();
+    const approvalOrder: string[] = [];
+    const callOrder: string[] = [];
+
+    const tool = defineTool({
+      name: "approval_safe",
+      description: "safe calls with controlled approvals",
+      inputSchema: z.object({ id: z.string() }),
+      isConcurrencySafe: () => true,
+      call: async ({ id }) => {
+        callOrder.push(id);
+        if (id === "one") {
+          firstCallStarted.resolve();
+          await firstCallGate.promise;
+        }
+        if (id === "four") fourthCallStarted.resolve();
+        return id;
+      },
+    });
+    const approval = vi.fn(async (_name: string, input: unknown) => {
+      const id = (input as { id: string }).id;
+      approvalOrder.push(id);
+      if (id === "one") {
+        firstApprovalStarted.resolve();
+        return firstApproval;
+      }
+      if (id === "two") {
+        secondApprovalStarted.resolve();
+        return secondApproval;
+      }
+      if (id === "three") throw new Error("approval exploded");
+      return "allow" as const;
+    });
+    const gen = runTools(
+      ["one", "two", "three", "four"].map((id) => ({ id, name: tool.name, input: { id } })),
+      makeRegistry([tool]),
+      new MockPlatform(),
+      {},
+      approval,
+    );
+
+    const firstResultPromise = gen.next();
+    await firstApprovalStarted.promise;
+    expect(approvalOrder).toEqual(["one"]);
+    resolveFirstApproval("allow");
+    await secondApprovalStarted.promise;
+    expect(approvalOrder).toEqual(["one", "two"]);
+    expect(callOrder).toEqual([]);
+
+    resolveSecondApproval("deny");
+    await firstCallStarted.promise;
+    expect(approvalOrder).toEqual(["one", "two"]);
+    expect(callOrder).toEqual(["one"]);
+    firstCallGate.resolve();
+    expect((await firstResultPromise).value?.event.toolCallId).toBe("one");
+
+    const denied = await gen.next();
+    expect(denied.value?.event.result).toBe("Tool 'approval_safe': call denied by approvalHandler");
+    expect(callOrder).not.toContain("two");
+    expect(approvalOrder).toEqual(["one", "two"]);
+
+    const approvalFailure = await gen.next();
+    expect(approvalFailure.value?.event.result).toBe(
+      "Tool 'approval_safe': approval check failed — approval exploded",
+    );
+    expect(callOrder).not.toContain("three");
+    expect(approvalOrder).toEqual(["one", "two", "three"]);
+
+    const fourthResultPromise = gen.next();
+    await fourthCallStarted.promise;
+    expect(approvalOrder).toEqual(["one", "two", "three", "four"]);
+    expect((await fourthResultPromise).value?.event.toolCallId).toBe("four");
+    expect((await gen.next()).done).toBe(true);
+  });
+
+  it("CB-7: waits for the prior safe result yield before approving an unmarked call alone", async () => {
+    const gates = [deferred(), deferred(), deferred()];
+    const started = [deferred(), deferred(), deferred()];
+    const active = new Set<number>();
+    const overlaps: Array<[number, number[]]> = [];
+    const approvals: number[] = [];
+    let safeBeforeSettled = false;
+    const safe = defineTool({
+      name: "safe_around_unmarked",
+      description: "safe work",
+      inputSchema: z.object({ index: z.union([z.literal(0), z.literal(2)]) }),
+      isConcurrencySafe: () => true,
+      call: async ({ index }) => {
+        overlaps.push([index, [...active]]);
+        active.add(index);
+        started[index]!.resolve();
+        await gates[index]!.promise;
+        active.delete(index);
+        if (index === 0) safeBeforeSettled = true;
+        return index;
+      },
+    });
+    const unmarked = defineTool({
+      name: "unmarked_barrier",
+      description: "must execute alone",
+      inputSchema: z.object({ index: z.literal(1) }),
+      call: async ({ index }) => {
+        overlaps.push([index, [...active]]);
+        active.add(index);
+        started[index]!.resolve();
+        await gates[index]!.promise;
+        active.delete(index);
+        return index;
+      },
+    });
+    const approval = vi.fn(async (_name: string, input: unknown) => {
+      approvals.push((input as { index: number }).index);
+      return "allow" as const;
+    });
+    const gen = runTools(
+      [
+        { id: "safe-before", name: safe.name, input: { index: 0 } },
+        { id: "unmarked", name: unmarked.name, input: { index: 1 } },
+        { id: "safe-after", name: safe.name, input: { index: 2 } },
+      ],
+      makeRegistry([safe, unmarked]),
+      new MockPlatform(),
+      {},
+      approval,
+    );
+
+    const safeBeforeResultPromise = gen.next();
+    await started[0]!.promise;
+    expect(safeBeforeSettled).toBe(false);
+    expect(approvals).toEqual([0]);
+    expect(overlaps).toEqual([[0, []]]);
+
+    gates[0]!.resolve();
+    const safeBeforeResult = await safeBeforeResultPromise;
+    expect(safeBeforeSettled).toBe(true);
+    expect(safeBeforeResult.value?.event.toolCallId).toBe("safe-before");
+    expect(approvals).toEqual([0]);
+
+    const unmarkedResultPromise = gen.next();
+    await started[1]!.promise;
+    expect(approvals).toEqual([0, 1]);
+    expect(overlaps).toEqual([[0, []], [1, []]]);
+    gates[1]!.resolve();
+    expect((await unmarkedResultPromise).value?.event.toolCallId).toBe("unmarked");
+
+    const safeAfterResultPromise = gen.next();
+    await started[2]!.promise;
+    expect(approvals).toEqual([0, 1, 2]);
+    expect(overlaps).toEqual([[0, []], [1, []], [2, []]]);
+    gates[2]!.resolve();
+    expect((await safeAfterResultPromise).value?.event.toolCallId).toBe("safe-after");
+    expect((await gen.next()).done).toBe(true);
+  });
+
+  it("CB-8: classifier false executes alone; classifier throw is exact and skips approval/call", async () => {
+    const falseGate = deferred();
+    const falseStarted = deferred();
+    const falseClassifier = vi.fn(() => false);
+    const throwingClassifier = vi.fn(() => { throw new Error("classifier exploded"); });
+    const throwingCall = vi.fn().mockResolvedValue("must not run");
+    const followingClassifier = vi.fn(() => true);
+    const followingStarted = deferred();
+    const falseTool = defineTool({
+      name: "classifier_false",
+      description: "false barrier",
+      inputSchema: z.object({ value: z.number().default(7) }),
+      isConcurrencySafe: falseClassifier,
+      call: async () => {
+        falseStarted.resolve();
+        await falseGate.promise;
+        return "false-result";
+      },
+    });
+    const throwingTool = defineTool({
+      name: "classifier_throw",
+      description: "throwing barrier",
+      inputSchema: z.object({}),
+      isConcurrencySafe: throwingClassifier,
+      call: throwingCall,
+    });
+    const following = defineTool({
+      name: "after_classifier_throw",
+      description: "following safe work",
+      inputSchema: z.object({}),
+      isConcurrencySafe: followingClassifier,
+      call: async () => {
+        followingStarted.resolve();
+        return "after";
+      },
+    });
+    const approval = vi.fn().mockResolvedValue("allow");
+    const gen = runTools(
+      [
+        { id: "false", name: falseTool.name, input: {} },
+        { id: "throw", name: throwingTool.name, input: {} },
+        { id: "after", name: following.name, input: {} },
+      ],
+      makeRegistry([falseTool, throwingTool, following]),
+      new MockPlatform(),
+      {},
+      approval,
+    );
+
+    const falseResultPromise = gen.next();
+    await falseStarted.promise;
+    expect(falseClassifier).toHaveBeenCalledOnce();
+    expect(falseClassifier).toHaveBeenCalledWith({ value: 7 });
+    expect(throwingClassifier).not.toHaveBeenCalled();
+    falseGate.resolve();
+    expect((await falseResultPromise).value?.event.result).toBe("false-result");
+
+    const thrown = await gen.next();
+    expect(thrown.value?.event.result).toBe(
+      "Tool 'classifier_throw': concurrency safety check failed — classifier exploded",
+    );
+    expect(throwingClassifier).toHaveBeenCalledOnce();
+    expect(throwingCall).not.toHaveBeenCalled();
+    expect(approval).toHaveBeenCalledTimes(1);
+    expect(followingClassifier).not.toHaveBeenCalled();
+
+    const followingResultPromise = gen.next();
+    await followingStarted.promise;
+    expect(followingClassifier).toHaveBeenCalledOnce();
+    expect(approval).toHaveBeenCalledTimes(2);
+    expect((await followingResultPromise).value?.event.toolCallId).toBe("after");
+    expect((await gen.next()).done).toBe(true);
+  });
+
+  it("CB-9: a safe tool throw does not suppress its sibling or permit an early yield", async () => {
+    const siblingGate = deferred();
+    const siblingStarted = deferred();
+    const throwing = defineTool({
+      name: "safe_throw",
+      description: "throws safely",
+      inputSchema: z.object({}),
+      isConcurrencySafe: () => true,
+      call: async () => { throw new Error("safe boom"); },
+    });
+    const sibling = defineTool({
+      name: "safe_sibling",
+      description: "controlled safe sibling",
+      inputSchema: z.object({}),
+      isConcurrencySafe: () => true,
+      call: async () => {
+        siblingStarted.resolve();
+        await siblingGate.promise;
+        return "sibling success";
+      },
+    });
+    const gen = runTools(
+      [
+        { id: "throwing", name: throwing.name, input: {} },
+        { id: "sibling", name: sibling.name, input: {} },
+      ],
+      makeRegistry([throwing, sibling]),
+      new MockPlatform(),
+      {},
+    );
+
+    let firstYielded = false;
+    const firstResultPromise = gen.next().then((result) => {
+      firstYielded = true;
+      return result;
+    });
+    await siblingStarted.promise;
+    await Promise.resolve();
+    expect(firstYielded).toBe(false);
+    siblingGate.resolve();
+
+    const first = await firstResultPromise;
+    const second = await gen.next();
+    expect([first.value?.event, second.value?.event]).toEqual([
+      {
+        type: "tool_result",
+        toolName: "safe_throw",
+        toolCallId: "throwing",
+        result: "safe boom",
+        isError: true,
+      },
+      {
+        type: "tool_result",
+        toolName: "safe_sibling",
+        toolCallId: "sibling",
+        result: "sibling success",
+        isError: false,
+      },
+    ]);
+  });
+
+  it("CB-10: normalizes an unexpected helper rejection with attribution and no unhandled rejection", async () => {
+    const usage = { inputTokens: 3, outputTokens: 4, cacheReadTokens: 5 };
+    let nameReads = 0;
+    const schema = z.object({});
+    const tool: Tool<typeof schema> = {
+      get name() {
+        nameReads += 1;
+        if (nameReads === 2 || nameReads === 3) throw new Error("unexpected helper rejection");
+        return "fragile_safe";
+      },
+      description: "forces executePrepared to reject",
+      inputSchema: schema,
+      isConcurrencySafe: () => true,
+      call: async (_input, _platform, context) => {
+        context.emitEvent?.({ type: "text_delta", text: "buffered child event" });
+        context.reportUsage?.(usage);
+        return "unreachable success envelope";
+      },
+    };
+    const unhandled = vi.fn();
+    const nodeProcess = Reflect.get(globalThis, "process") as NodeJS.Process;
+    nodeProcess.on("unhandledRejection", unhandled);
+
+    try {
+      const executions = await collect(runTools(
+        [{ id: "fragile-id", name: "fragile_safe", input: {} }],
+        makeRegistry([tool]),
+        new MockPlatform(),
+        {},
+      ));
+      await new Promise<void>((resolve) => { setImmediate(resolve); });
+
+      expect(executions).toEqual([{
+        event: {
+          type: "tool_result",
+          toolName: "fragile_safe",
+          toolCallId: "fragile-id",
+          result: "unexpected helper rejection",
+          isError: true,
+        },
+        childEvents: [{ type: "text_delta", text: "buffered child event" }],
+        reportedUsage: [usage],
+      }]);
+      expect(unhandled).not.toHaveBeenCalled();
+    } finally {
+      nodeProcess.off("unhandledRejection", unhandled);
+    }
+  });
+
+  it("CB-19: starts more than eight safe calls before any is resolved", async () => {
+    const count = 12;
+    const gates = Array.from({ length: count }, () => deferred());
+    const latch = makeStartedLatch(count);
+    const started: number[] = [];
+    const tool = defineTool({
+      name: "uncapped_safe",
+      description: "proves the batch is not capped",
+      inputSchema: z.object({ index: z.number().int().min(0).max(count - 1) }),
+      isConcurrencySafe: () => true,
+      call: async ({ index }) => {
+        started.push(index);
+        latch.started();
+        await gates[index]!.promise;
+        return index;
+      },
+    });
+
+    const collecting = collect(runTools(
+      Array.from({ length: count }, (_, index) => ({
+        id: `call-${index}`,
+        name: tool.name,
+        input: { index },
+      })),
+      makeRegistry([tool]),
+      new MockPlatform(),
+      {},
+    ));
+
+    await latch.allStarted;
+    expect(started).toEqual(Array.from({ length: count }, (_, index) => index));
+    for (const gate of gates) gate.resolve();
+    const executions = await collecting;
+    expect(executions.map(({ event }) => event.toolCallId)).toEqual(
+      Array.from({ length: count }, (_, index) => `call-${index}`),
+    );
+  });
+
+  it("keeps task, write/edit/bash, and read_file unmarked for Task 06", () => {
+    const taskTool = createTaskTool({
+      resolveChild: () => { throw new Error("not invoked by marker inspection"); },
+    });
+
+    expect(taskTool.isConcurrencySafe).toBeUndefined();
+    expect(writeFileTool.isConcurrencySafe).toBeUndefined();
+    expect(editFileTool.isConcurrencySafe).toBeUndefined();
+    expect(bashTool.isConcurrencySafe).toBeUndefined();
+    expect(readFileTool.isConcurrencySafe).toBeUndefined();
   });
 });
 
