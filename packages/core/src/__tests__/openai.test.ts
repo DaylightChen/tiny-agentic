@@ -1,5 +1,8 @@
 import { vi, describe, it, expect, beforeEach, afterEach } from "vitest";
 
+import { Agent } from "../agent.js";
+import { NodePlatform } from "../platform/node.js";
+import { collectEvents } from "../utils/collect.js";
 import type { ProviderEvent, ProviderRequest } from "../types/provider.js";
 
 // Mock the OpenAI SDK so no network is touched and the streaming path runs to
@@ -76,7 +79,10 @@ describe("OpenAIProvider", () => {
     const events = await drain(provider.stream({ ...emptyRequest }));
 
     // Stream ran to completion through the trailing accumulator.flush().
-    expect(events.some((e) => e.type === "message_stop")).toBe(true);
+    expect(events).toEqual([
+      { type: "text_delta", text: "hi" },
+      { type: "message_stop", stopReason: { kind: "end_turn", raw: "stop" } },
+    ]);
 
     // The real 7.14 check: nothing is emitted to the console without a logger.
     expect(logSpy).not.toHaveBeenCalled();
@@ -176,8 +182,36 @@ describe("OpenAIProvider", () => {
     expect(events).toEqual([
       { type: "text_delta", text: "Hello" },
       { type: "text_delta", text: " world" },
-      { type: "message_stop", stopReason: "end_turn" },
+      { type: "message_stop", stopReason: { kind: "end_turn", raw: "stop" } },
     ]);
+  });
+
+  it("infers a structured refusal reason without emitting refusal text", async () => {
+    streamImpl = async function* () {
+      yield { choices: [{ index: 0, delta: { refusal: "policy" }, finish_reason: null }] };
+      yield { choices: [{ index: 0, delta: {}, finish_reason: "stop" }] };
+    };
+
+    const provider = new OpenAIProvider({ apiKey: "k", model: "m" });
+    await expect(drain(provider.stream({ ...emptyRequest }))).resolves.toEqual([
+      { type: "message_stop", stopReason: { kind: "refusal", raw: "stop" } },
+    ]);
+  });
+
+  it("flows OpenAI refusal data through Agent to the structured Terminal (SR-13)", async () => {
+    streamImpl = async function* () {
+      yield { choices: [{ index: 0, delta: { content: "partial", refusal: "policy" }, finish_reason: null }] };
+      yield { choices: [{ index: 0, delta: {}, finish_reason: "stop" }] };
+    };
+
+    const provider = new OpenAIProvider({ apiKey: "k", model: "m" });
+    const { events, terminal } = await collectEvents(
+      new Agent({ provider, tools: [], platform: new NodePlatform() }).run("test"),
+    );
+
+    expect(events).toContainEqual({ type: "text_delta", text: "partial" });
+    if (terminal.reason !== "agent_done") throw new Error("expected successful terminal");
+    expect(terminal.stopReason).toEqual({ kind: "refusal", raw: "stop" });
   });
 
   it("yields a single tool_use then message_stop for one tool call", async () => {
@@ -212,7 +246,7 @@ describe("OpenAIProvider", () => {
 
     expect(events).toEqual([
       { type: "tool_use", id: "call_1", name: "get_weather", input: { city: "SF" } },
-      { type: "message_stop", stopReason: "tool_use" },
+      { type: "message_stop", stopReason: { kind: "tool_use", raw: "tool_calls" } },
     ]);
   });
 
@@ -256,7 +290,7 @@ describe("OpenAIProvider", () => {
     expect(events).toEqual([
       { type: "tool_use", id: "call_a", name: "alpha", input: { x: 1 } },
       { type: "tool_use", id: "call_b", name: "beta", input: { y: 2 } },
-      { type: "message_stop", stopReason: "tool_use" },
+      { type: "message_stop", stopReason: { kind: "tool_use", raw: "tool_calls" } },
     ]);
   });
 
@@ -289,7 +323,7 @@ describe("OpenAIProvider", () => {
         input: {},
         inputParseError: true,
       },
-      { type: "message_stop", stopReason: "tool_use" },
+      { type: "message_stop", stopReason: { kind: "tool_use", raw: "tool_calls" } },
     ]);
   });
 

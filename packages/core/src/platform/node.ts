@@ -1,5 +1,5 @@
 import { readFile, writeFile, readdir, lstat } from "node:fs/promises";
-import { basename, join, resolve } from "node:path";
+import { basename, isAbsolute, join, relative, resolve, sep } from "node:path";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import type { Dirent, Stats } from "node:fs";
@@ -26,13 +26,25 @@ function direntType(entry: Dirent | Stats): DirEntry["type"] {
 
 /**
  * Node.js implementation of the Platform interface.
- * The ONLY module in the core package that imports Node built-ins or references
- * `process`. Any use of `process`, `fs`, or `child_process` outside this file
- * is a lint error.
+ * Node built-ins and `process` are confined to the explicit Node platform modules:
+ * this file and fs-discovery.ts.
  * Exported from tiny-agentic/platform/node (separate entry point).
  */
 export class NodePlatform implements Platform {
-  /** Returns the current working directory. Only place process.cwd() is called. */
+  resolvePath(path: string): string {
+    return resolve(this.cwd(), path);
+  }
+
+  formatPath(path: string): string {
+    const resolved = this.resolvePath(path);
+    const fromCwd = relative(this.cwd(), resolved);
+    if (fromCwd === "") return ".";
+    return isAbsolute(fromCwd) || fromCwd === ".." || fromCwd.startsWith(`..${sep}`)
+      ? resolved
+      : fromCwd;
+  }
+
+  /** Returns the Node process working directory; process access stays in this module. */
   cwd(): string {
     return process.cwd();
   }
@@ -91,7 +103,7 @@ export class NodePlatform implements Platform {
       if (code === "ENOTDIR") throw new Error(`ls: not a directory: ${path}`);
       throw err;
     }
-    return Promise.all(
+    const collected = await Promise.all(
       entries.map(async (entry): Promise<DirEntry> => {
         const full = join(path, entry.name);
         const stats = await lstat(full);
@@ -103,6 +115,10 @@ export class NodePlatform implements Platform {
         };
       }),
     );
+    const compareName = (a: DirEntry, b: DirEntry): number =>
+      a.name < b.name ? -1 : a.name > b.name ? 1 : 0;
+    if (process.env.NODE_ENV === "test") return collected.sort(compareName);
+    return collected.sort((a, b) => b.mtimeMs - a.mtimeMs || compareName(a, b));
   }
 
   async stat(path: string): Promise<DirEntry> {

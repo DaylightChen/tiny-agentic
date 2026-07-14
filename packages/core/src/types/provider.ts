@@ -4,7 +4,7 @@ import type { Usage } from "./usage.js";
 /**
  * Serialized tool schema sent in a ProviderRequest.
  * Produced by ToolRegistry from a Tool's Zod inputSchema via zod-to-json-schema.
- * The openApi3 target is used for compatibility with both Anthropic and OpenAI.
+ * The jsonSchema7 target is used for compatibility with both Anthropic and OpenAI.
  */
 export type ToolSchema = {
   name: string;
@@ -25,12 +25,34 @@ export type ProviderRequest = {
   maxTokens?: number;
 };
 
-/** Canonical streaming events yielded by a provider. Provider-agnostic. */
+export type StopReasonKind =
+  | "end_turn"
+  | "tool_use"
+  | "max_tokens"
+  | "stop_sequence"
+  | "pause_turn"
+  | "refusal"
+  | "content_filter"
+  | "model_context_window_exceeded"
+  | "other";
+
+export type StopReason =
+  | { kind: "end_turn"; raw: string | null }
+  | { kind: "tool_use"; raw: string | null }
+  | { kind: "max_tokens"; raw: string | null }
+  | { kind: "stop_sequence"; raw: string | null }
+  | { kind: "pause_turn"; raw: string | null }
+  | { kind: "refusal"; raw: string | null }
+  | { kind: "content_filter"; raw: string | null }
+  | { kind: "model_context_window_exceeded"; raw: string | null }
+  | { kind: "other"; raw: string | null };
+
+/** Canonical provider-agnostic stream, including required normalized completion reasons. */
 export type ProviderEvent =
   | { type: "text_delta";      text: string }
   | { type: "reasoning_delta"; text: string }
   | { type: "tool_use";        id: string; name: string; input: unknown; inputParseError?: boolean }
-  | { type: "message_stop";    stopReason: "end_turn" | "tool_use" | "max_tokens" | string; usage?: Usage };
+  | { type: "message_stop";    stopReason: StopReason; usage?: Usage };
 
 // Malformed streamed tool input (§6.1) is signalled by the optional
 // `inputParseError: true` boolean on a tool_use event, NOT by a sentinel value
@@ -45,7 +67,7 @@ export type ProviderEvent =
 
 /**
  * Structured log entry passed to the optional logger callback.
- * Extend the union in M2 when cost/token tracking is added.
+ * Token usage is surfaced on ProviderEvent message_stop events.
  */
 export type LogEntry =
   | { level: "info";  event: "request_sent";   request: ProviderRequest }

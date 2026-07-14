@@ -1,14 +1,13 @@
 import { z } from "zod";
 import { defineTool } from "../../types/tool.js";
 import type { GlobOptions } from "../../types/platform.js";
-import { toReturnPath } from "./_paths.js";
 
 const DEFAULT_LIMIT = 250;
 
 export const globTool = defineTool({
   name: "glob",
   description:
-    'Find files by glob pattern (e.g. "src/**/*.ts"). Returns paths sorted by modification time, most recent first. Does not search file contents — use grep for that.',
+    'Find files by glob pattern (e.g. "src/**/*.ts"). Returns matched paths in the configured Platform’s display order. Does not search file contents — use grep for that.',
   inputSchema: z.object({
     pattern: z.string().describe('Glob pattern, e.g. "src/**/*.ts".'),
     path: z.string().optional().describe("Base directory to glob from. Defaults to the working directory."),
@@ -21,13 +20,12 @@ export const globTool = defineTool({
       respectGitignore: respect_gitignore ?? true,
       includeHidden: include_hidden ?? false,
       limit: limit ?? DEFAULT_LIMIT,
-      ...(path !== undefined ? { cwd: path } : {}),
+      ...(path !== undefined ? { cwd: platform.resolvePath(path) } : {}),
       ...(context.signal !== undefined ? { signal: context.signal } : {}),
     };
 
     const { paths, truncated } = await platform.glob(pattern, options);
-    const cwd = platform.cwd();
-    const files = paths.map((p) => toReturnPath(p, cwd));
+    const files = paths.map((path) => platform.formatPath(path));
 
     return { files, truncated };
   },

@@ -19,6 +19,7 @@ import {
   type Message,
   type ChildSpec,
   type ApprovalHandler,
+  type StopReason,
   type Usage,
 } from "tiny-agentic";
 import { AnthropicProvider } from "tiny-agentic/providers/anthropic";
@@ -34,6 +35,10 @@ if (!apiKey) {
 function formatUsage(u: Usage): string {
   const cw = u.cacheWriteTokens !== undefined ? `, cacheWrite=${u.cacheWriteTokens}` : "";
   return `in=${u.inputTokens} out=${u.outputTokens} cacheRead=${u.cacheReadTokens}${cw}`;
+}
+
+function formatStopReason(reason: StopReason): string {
+  return reason.kind === "other" ? `other (raw=${JSON.stringify(reason.raw)})` : reason.kind;
 }
 
 const provider = new AnthropicProvider({
@@ -67,15 +72,28 @@ for await (const event of agent.run("What is 2 + 2? Reply with just the number."
     case "text_delta":
       process.stdout.write(event.text);
       break;
+    case "reasoning_delta":
+      process.stderr.write(event.text);
+      break;
     case "tool_use_start":
       console.log(`\n[calling tool: ${event.toolName}]`);
       break;
     case "tool_result":
       console.log(`[tool result: isError=${event.isError}, result=${JSON.stringify(event.result).slice(0, 80)}]`);
       break;
+    case "turn_complete":
+      console.log(`[turn ${event.turnIndex} complete: ${formatStopReason(event.stopReason)}]`);
+      break;
+    case "subagent_event": {
+      const childStop = event.event.type === "terminal" && event.event.reason === "agent_done"
+        ? `: ${formatStopReason(event.event.stopReason)}`
+        : "";
+      console.log(`[child ${event.taskId}: ${event.event.type}${childStop}]`);
+      break;
+    }
     case "agent_done":
       history = event.messages;
-      console.log("\n[agent done]");
+      console.log(`\n[agent done: ${formatStopReason(event.stopReason)}]`);
       break;
     case "agent_error":
       console.error("\n[agent error]", event.error.message);
@@ -93,9 +111,10 @@ console.log("\n=== Turn 2: Multi-turn continuation ===");
 
 for await (const event of agent.run("What did I just ask you? Repeat my question back to me.", { messages: history })) {
   if (event.type === "text_delta") process.stdout.write(event.text);
+  if (event.type === "turn_complete") console.log(`[turn ${event.turnIndex}: ${formatStopReason(event.stopReason)}]`);
   if (event.type === "agent_done") {
     history = event.messages;
-    console.log("\n[agent done, total messages:", history.length, "]");
+    console.log(`\n[agent done: ${formatStopReason(event.stopReason)}, total messages: ${history.length}]`);
   }
 }
 
@@ -107,11 +126,20 @@ for await (const event of agent.run(
 )) {
   switch (event.type) {
     case "text_delta": process.stdout.write(event.text); break;
+    case "reasoning_delta": process.stderr.write(event.text); break;
     case "tool_use_start": console.log(`\n[calling: ${event.toolName}(${JSON.stringify(event.toolInput)})]`); break;
     case "tool_result": console.log(`[result: isError=${event.isError}]`); break;
-    case "turn_complete": console.log(`[turn ${event.turnIndex} complete]`); break;
-    case "agent_done": console.log("\n[agent done]"); break;
+    case "turn_complete": console.log(`[turn ${event.turnIndex} complete: ${formatStopReason(event.stopReason)}]`); break;
+    case "subagent_event": {
+      const childStop = event.event.type === "terminal" && event.event.reason === "agent_done"
+        ? `: ${formatStopReason(event.event.stopReason)}`
+        : "";
+      console.log(`[child ${event.taskId}: ${event.event.type}${childStop}]`);
+      break;
+    }
+    case "agent_done": console.log(`\n[agent done: ${formatStopReason(event.stopReason)}]`); break;
     case "agent_error": console.error("\n[agent error]", event.error.message); process.exit(1); break;
+    case "max_turns_exceeded": console.error("\n[max turns exceeded]"); break;
   }
 }
 
@@ -153,6 +181,16 @@ for await (const event of toolAgent.run(
     case "text_delta":
       process.stdout.write(event.text);
       break;
+    case "reasoning_delta":
+      process.stderr.write(event.text);
+      break;
+    case "subagent_event": {
+      const childStop = event.event.type === "terminal" && event.event.reason === "agent_done"
+        ? `: ${formatStopReason(event.event.stopReason)}`
+        : "";
+      console.log(`[child ${event.taskId}: ${event.event.type}${childStop}]`);
+      break;
+    }
     case "tool_use_start":
       console.log(`\n[calling: ${event.toolName}(${JSON.stringify(event.toolInput).slice(0, 120)})]`);
       break;
@@ -160,10 +198,10 @@ for await (const event of toolAgent.run(
       console.log(`[result: isError=${event.isError}, result=${JSON.stringify(event.result).slice(0, 120)}]`);
       break;
     case "turn_complete":
-      console.log(`[turn ${event.turnIndex} complete]`);
+      console.log(`[turn ${event.turnIndex} complete: ${formatStopReason(event.stopReason)}]`);
       break;
     case "agent_done":
-      console.log("\n[agent done]");
+      console.log(`\n[agent done: ${formatStopReason(event.stopReason)}]`);
       break;
     case "agent_error":
       console.error("\n[agent error]", event.error.message);
@@ -180,11 +218,21 @@ console.log("\n=== Turn 5a: token usage ===");
 for await (const event of agent.run("In one sentence, what is an AbortSignal?")) {
   switch (event.type) {
     case "text_delta": process.stdout.write(event.text); break;
+    case "reasoning_delta": process.stderr.write(event.text); break;
+    case "tool_use_start": console.log(`\n[calling: ${event.toolName}]`); break;
+    case "tool_result": console.log(`[result: isError=${event.isError}]`); break;
+    case "subagent_event": {
+      const childStop = event.event.type === "terminal" && event.event.reason === "agent_done"
+        ? `: ${formatStopReason(event.event.stopReason)}`
+        : "";
+      console.log(`[child ${event.taskId}: ${event.event.type}${childStop}]`);
+      break;
+    }
     case "turn_complete":
-      if (event.usage) console.log(`\n[turn ${event.turnIndex} usage: ${formatUsage(event.usage)}]`);
+      console.log(`\n[turn ${event.turnIndex}: ${formatStopReason(event.stopReason)}${event.usage ? `, usage: ${formatUsage(event.usage)}` : ""}]`);
       break;
     case "agent_done":
-      console.log(`\n[done — cumulative usage: ${formatUsage(event.usage)}]`);
+      console.log(`\n[done: ${formatStopReason(event.stopReason)} — cumulative usage: ${formatUsage(event.usage)}]`);
       break;
     case "agent_error": console.error("\n[agent error]", event.error.message); break;
     case "max_turns_exceeded": console.error("\n[max turns]"); break;
@@ -205,12 +253,24 @@ for await (const event of agent.run(
       process.stdout.write(event.text);
       if (!aborted) { aborted = true; controller.abort(); } // cancel as soon as output starts
       break;
+    case "reasoning_delta": process.stderr.write(event.text); break;
+    case "tool_use_start": console.log(`\n[calling: ${event.toolName}]`); break;
+    case "tool_result": console.log(`[result: isError=${event.isError}]`); break;
+    case "subagent_event": {
+      const childStop = event.event.type === "terminal" && event.event.reason === "agent_done"
+        ? `: ${formatStopReason(event.event.stopReason)}`
+        : "";
+      console.log(`[child ${event.taskId}: ${event.event.type}${childStop}]`);
+      break;
+    }
+    case "turn_complete": console.log(`[turn ${event.turnIndex}: ${formatStopReason(event.stopReason)}]`); break;
+    case "max_turns_exceeded": console.error("\n[max turns exceeded]"); break;
     case "agent_error":
       console.log(`\n[run cancelled as expected → agent_error: ${event.error.message}]`);
       console.log(`[partial usage at cancel: ${formatUsage(event.usage)}]`);
       break;
     case "agent_done":
-      console.log(`\n[completed before abort took effect — usage: ${formatUsage(event.usage)}]`);
+      console.log(`\n[completed before abort took effect: ${formatStopReason(event.stopReason)} — usage: ${formatUsage(event.usage)}]`);
       break;
   }
 }
@@ -252,6 +312,9 @@ for await (const event of coordinator.run(
     case "text_delta":
       process.stdout.write(event.text);
       break;
+    case "reasoning_delta":
+      process.stderr.write(event.text);
+      break;
     case "tool_use_start":
       console.log(`\n[parent calls: ${event.toolName}(${JSON.stringify(event.toolInput).slice(0, 120)})]`);
       break;
@@ -260,19 +323,23 @@ for await (const event of coordinator.run(
       // calls, and terminal usage surface here without flattening into the parent stream.
       const c = event.event;
       if (c.type === "text_delta") process.stdout.write(`  [child ${event.taskId}] ${c.text}`);
+      else if (c.type === "reasoning_delta") process.stderr.write(`  [child ${event.taskId} reasoning] ${c.text}`);
       else if (c.type === "tool_use_start") console.log(`  [child ${event.taskId}] tool: ${c.toolName}`);
       else if (c.type === "tool_result") console.log(`  [child ${event.taskId}] tool_result (${c.toolName}, isError=${c.isError})`);
-      else if (c.type === "terminal") console.log(`  [child ${event.taskId}] terminal: ${c.reason} usage=${formatUsage(c.usage)}`);
+      else if (c.type === "terminal") {
+        const stop = c.reason === "agent_done" ? ` stop=${formatStopReason(c.stopReason)}` : "";
+        console.log(`  [child ${event.taskId}] terminal: ${c.reason}${stop} usage=${formatUsage(c.usage)}`);
+      }
       break;
     }
     case "tool_result":
       console.log(`\n[parent tool_result: isError=${event.isError}, result=${JSON.stringify(event.result).slice(0, 160)}]`);
       break;
     case "turn_complete":
-      if (event.usage) console.log(`[turn ${event.turnIndex} complete, usage: ${formatUsage(event.usage)}]`);
+      console.log(`[turn ${event.turnIndex} complete: ${formatStopReason(event.stopReason)}${event.usage ? `, usage: ${formatUsage(event.usage)}` : ""}]`);
       break;
     case "agent_done":
-      console.log(`\n[agent done — rolled-up usage (incl. child): ${formatUsage(event.usage)}]`);
+      console.log(`\n[agent done: ${formatStopReason(event.stopReason)} — rolled-up usage (incl. child): ${formatUsage(event.usage)}]`);
       break;
     case "agent_error":
       console.error("\n[agent error]", event.error.message);

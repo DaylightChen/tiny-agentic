@@ -1,6 +1,6 @@
 {
   "name": "tiny-agentic",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Headless agentic engine: agent loop, tools, provider abstraction, typed event stream.",
   "type": "module",
   "license": "MIT",

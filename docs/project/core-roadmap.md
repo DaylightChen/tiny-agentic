@@ -1,88 +1,77 @@
 # Core Package Roadmap — Remaining Scope
 
-> **Status:** living reference. Captures what is still worth building **in `packages/core`** (the UI-free, headless engine), and what deliberately belongs elsewhere (SDK layer / separate packages).
+> **Status:** living reference for `packages/core`, the UI-free headless engine.
 >
-> **Date:** 2026-06-29; **last updated 2026-06-30** after the `core-run-controls` feature landed (Tier-1 #2 + #3 done).
+> **Last updated:** 2026-07-14 after core runtime hardening.
 >
-> This is a roadmap, not a commitment. Each Tier-1/2 item becomes its own `phased-dev` feature scope when picked up. Cross-cutting design decisions already locked live in `docs/project/decisions.md`; defer-to-SDK rationale is there too.
+> This is a roadmap, not a commitment. Completed feature scopes remain documented under `docs/feature/`; cross-cutting decisions live in `docs/project/decisions.md`.
 
-## Current state of `packages/core` (as of 2026-06-30)
+## Current state of `packages/core`
 
-The core is a working headless agent:
+The core now ships the original agent runtime and every previously identified Tier-1/Tier-2 runtime capability:
 
-- **Loop:** stateless `agentLoop` async generator, `maxTurns` guard, abort-on-break, defensive tool-result serialization, per-turn → run-level token-usage accumulation.
-- **Providers:** Anthropic + OpenAI behind the `Provider` abstraction, with SDK-delegated retry (`maxRetries`); both capture and normalize token usage.
-- **Platform:** `cwd` / `readFile` / `writeFile` / `exec` (Node impl; `exec` supports `shell` + `signal` as of `agent-tooling`).
-- **Built-in tools:** `read_file`, `write_file` (with line-range mode), `bash`, `edit_file`.
-- **Permission seam:** optional `approvalHandler(toolName, input) → 'allow' | 'deny'` on `AgentOptions`, gated in `runTools` before `tool.call`. Default = blanket allow.
-- **Cancellation:** the run's `AbortSignal` threads through `ToolCallContext.signal` into `Platform.exec`; **external `AbortSignal` accepted on `run(prompt, { signal })`** (composed via `AbortSignal.any`, pre-flight guard).
-- **Token usage:** normalized `Usage` (`{ inputTokens, outputTokens, cacheReadTokens, cacheWriteTokens? }`) on the terminal `AgentEvent`s + `Terminal` (cumulative) and on `turn_complete` (per-turn); `mergeUsage`/`accumulateUsage`/`EMPTY_USAGE` helpers exported.
+- **Loop and outcomes:** stateless `agentLoop` async generator, turn cap, cancellation, defensive serialization, reasoning events, cumulative usage, and required normalized stop reasons on completed turns and successful terminals.
+- **Providers:** Anthropic and OpenAI behind one `Provider` abstraction, including SDK-delegated retry, usage normalization, reasoning deltas, and provider-native stop-reason normalization with an `other/raw` fallback.
+- **Tools:** `read_file`, `write_file`, `bash`, `edit_file`, `ls`, `glob`, `grep`, and the sub-agent `task` factory.
+- **Sub-agents:** host-owned child resolution and tool sets, sanitized child events, child usage roll-up, linked cancellation, and structural plus numeric recursion bounds.
+- **Platform:** Node implementation plus a portable main graph. Path resolution/formatting and discovery order belong to the injected Platform; the main model-facing entry has no Node/process edge.
+- **Approvals and run controls:** optional allow/deny approval callback, external `AbortSignal`, and explicit cancellation limitations.
+- **Safe batching:** approved `read_file`, `ls`, `glob`, and `grep` calls execute in maximal contiguous concurrent batches while results, child attribution, usage, and serialization retain model order. Unsafe calls and failures remain barriers.
 
-Feature history: M1 core (`docs/project/`), `openai-provider`, `agent-tooling`, `core-run-controls` (`docs/feature/<name>/`).
+Feature history: M1 core, `openai-provider`, `agent-tooling`, `core-run-controls`, `task-tool`, `fs-discovery-tools`, `reasoning-events`, and `core-runtime-hardening` under `docs/feature/`.
 
----
+## Shipped roadmap items
 
-## Tier 1 — real gaps, high leverage, unambiguously core
+### Filesystem discovery — shipped
 
-> **Progress:** #2 (token usage) and #3 (external AbortSignal) shipped in the `core-run-controls` feature (2026-06-30) — see `docs/feature/core-run-controls/`. Remaining Tier-1: #1 (fs-discovery) and #4 (sub-agent Task tool, prioritized).
+Structured `ls`, `glob`, and `grep` provide shell-independent code navigation with hidden-file and nested-`.gitignore` behavior, bounded output, deterministic test ordering, and a pure-JS Node implementation behind portable Platform methods.
 
-### 1. Filesystem *discovery* tools (`ls` / `glob` / `grep`)
+### Token usage and external cancellation — shipped
 
-**The standout gap.** The agent can read/write/edit files whose paths it already knows, but it cannot *find* anything except by shelling out through `bash`. Discovery ("grep for X, glob for Y, read the hits") is most of what makes a coding agent useful.
+Normalized `Usage` appears per provider turn and cumulatively on terminals. Child Task usage rolls into the parent total. `Agent.run` accepts an external signal; active calls receive it and no new calls start after abort is observed.
 
-- Dedicated structured tools are safer than `bash` and — importantly — don't trip the permission gate that consumers will most often use to *block* shell access.
-- Requires **new `Platform` methods** (`listDir` / `glob` / `stat`). This is the breaking `Platform` change the M1 decisions log explicitly anticipated for M2 (adding methods forces all `Platform` implementors, incl. `MockPlatform`, to update — acceptable, caught at compile time).
-- Recommended as the **next core feature**.
+### Sub-agent Task tool — shipped
 
-### 2. Token usage in the event stream + `Terminal` — ✅ DONE (core-run-controls, 2026-06-30)
+`createTaskTool` delegates a self-contained prompt to a host-constructed child Agent, surfaces sanitized child lifecycle events, reports child usage, links cancellation, and enforces recursion safeguards.
 
-Shipped: normalized `Usage` (`{ inputTokens, outputTokens, cacheReadTokens, cacheWriteTokens? }`) on the terminal `AgentEvent`s + `Terminal` (cumulative) and on `turn_complete` (per-turn), captured from both providers (Anthropic `message_start`/`message_delta`; OpenAI `include_usage` + `translateChunk`), accumulated in the loop. `mergeUsage`/`accumulateUsage`/`EMPTY_USAGE` exported. **Unblocks** context compaction (SDK) and provides the **Task-tool usage roll-up seam** (`Terminal.usage`).
+### Reasoning events — shipped
 
-### 3. External `AbortSignal` on `run()` — ✅ DONE (core-run-controls, 2026-06-30)
+Provider reasoning deltas surface as observation-only `reasoning_delta` events and are deliberately excluded from threaded assistant history.
 
-Shipped: `RunOptions.signal?` composed with the internal controller via `AbortSignal.any`, with a pre-flight `signal.aborted` guard. Consumers can now cancel from outside (timeout / Ctrl-C / a parent cancelling a child). **Sub-agent enabler** (#4): a parent can cancel a child run.
+### Typed stop reasons — shipped
 
-### 4. Sub-agent / `Task` tool  ⭐ prioritized — NEXT (enablers now in place)
+Every completed provider turn and successful final/child terminal exposes a normalized `StopReason`. Consumers can switch exhaustively on `kind` and retain unknown or missing native detail through `raw`.
 
-A built-in tool that runs a **nested `Agent`** with its own tool set and turn budget, returning a summarized result to the parent. Promoted from Tier 2 to Tier 1 as the next core feature to pursue — it is the capability that turns "an agent" into "an agent framework."
+### Portable model-facing graph — shipped
 
-- The brainstorm flagged sub-agents as core.
-- **Both enablers are now shipped (#2 token usage, #3 external AbortSignal)** — this is why `core-run-controls` was sequenced first. The Task tool can roll child usage up via `Terminal.usage` and propagate cancellation to children via the external signal.
-- Largest Tier-1 lift. Design points to settle: the `Task` tool wraps a nested `Agent` instance; parent/child isolation (separate history, tool set, `maxTurns`); how child progress surfaces to the parent stream (summarized final result vs. forwarded events); and a **recursion-depth guard** so an agent can't spawn children unboundedly.
+Path grammar, formatting, and discovery ordering are Platform contracts. `ls`, `glob`, and `grep` no longer import Node path/process behavior through the main entry, and the built bundle has an automated portability boundary check.
 
----
+### Concurrent safe filesystem batches — shipped
 
-## Tier 2 — core, medium value
+Contiguous approved calls to `read_file`, `ls`, `glob`, and `grep` may overlap without changing model-visible order. Approvals are serial, barriers prevent look-ahead, all started siblings settle, and no framework concurrency cap is imposed.
 
-### 5. Concurrent execution of concurrency-safe tools
+## Remaining core work
 
-The `isConcurrencySafe?(input)` hook already exists on the `Tool` interface (`packages/core/src/types/tool.ts`, reserved in M1, currently unused). `runTools` executes tools strictly sequentially.
+### Concurrent Task calls — future, separate design
 
-- Let read-only tools (`read_file`, `grep`, `ls`) in the same turn run in parallel; keep stateful tools (`bash`, `edit_file`, `write_file`) sequential.
-- Real latency win; the seam is already present, so this is mostly loop logic + a batching strategy.
+Task deliberately remains unmarked and sequential. Parallel child Agents need explicit decisions for real-time child-event delivery, per-child usage attribution, cancellation while children are active, and resource limits. The filesystem scheduler is not sufficient evidence to mark Task safe.
 
----
+### Potential additive hardening
 
-## Deliberately NOT core (SDK layer / separate packages)
+- Optional concurrency/backpressure policy if real workloads show resource amplification from very large safe batches.
+- Automatic continuation policy for provider pause outcomes, if consumers need it.
+- General per-tool timeout controls beyond the existing bash timeout.
+- Native discovery acceleration behind `Platform.grep` if pure-JS traversal becomes limiting.
 
-- **Rich permission modes** — `'ask'`, allow-lists, rule patterns (e.g. `Bash(git commit:*)`), permission modes like `acceptEdits`. The current `allow`/`deny` callback is the *seam*; the policy engine is SDK territory (per `docs/project/decisions.md`).
-- **Context compaction / auto-summarize** near the context window — a policy, lives in the SDK, but **depends on Tier-1 #2** (token counting must exist in core first).
-- **System-prompt assembly, skills, sessions, memory** — assigned to `packages/sdk` by the M1 decisions.
-- **MCP / external tool sources** — a separate package layered on top of core.
-- **Prompt-cache breakpoint management** — possible core `Provider` concern, lower priority; revisit if cost becomes a driver.
+## Deliberately not core
 
----
+- Rich permission modes, allow-list/rule engines, sandbox policy, and interaction UX.
+- Context compaction, system-prompt assembly, skills, sessions, and memory.
+- MCP or external tool-source integration.
+- CLI, TUI, web, or other rendered interfaces.
 
-## Recommended sequencing
+These belong in SDK or integration packages layered over the core's typed provider, event, tool, Platform, approval, usage, and cancellation contracts.
 
-> Reordered 2026-06-30 to prioritize the sub-agent `Task` tool (#4).
+## Explicitly deferred
 
-1. ~~**External `AbortSignal` on `run()` (#3)** + **token usage in events (#2)**~~ — ✅ **DONE** (`core-run-controls`, 2026-06-30). The enablers the Task tool builds on.
-2. **Sub-agent `Task` tool (#4)** ⭐ — **NEXT.** The prioritized core feature; nests an `Agent` behind a tool with parent/child isolation and a recursion-depth guard.
-3. **`fs-discovery-tools` (#1)** — high-impact `ls`/`glob`/`grep` + the anticipated `Platform` method additions; gives both the parent and its sub-agents real filesystem reach.
-4. **Concurrent tool execution (#5)** — once more read-only tools exist to benefit from it.
-5. Then shift to the **SDK layer** (`packages/sdk`): permission policy engine, context compaction (on top of #2), sessions/memory/skills.
-
-## Explicitly deferred (already logged)
-
-See `docs/project/known-issues.md` and `docs/feature/agent-tooling/engineering/2026-06-29-agent-tooling-engineering.md` §13: `edit_file` read-before-edit enforcement, `bash` output truncation, SIGKILL grace period, `bash` background tasks, sandbox integration, `edit_file` quote normalization / stale-read, permission rule patterns.
+See `docs/project/known-issues.md` for current limitations including Task concurrency/real-time events, cross-provider usage aggregation, pure-JS discovery performance, read-before-edit policy, and deferred grep features.

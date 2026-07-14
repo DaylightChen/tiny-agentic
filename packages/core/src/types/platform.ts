@@ -28,7 +28,7 @@ export type GlobOptions = {
 };
 
 export type GlobResult = {
-  paths: string[];                      // absolute paths, mtime-desc sorted
+  paths: string[];                      // absolute paths in final display order
   truncated: boolean;                   // more matched than `limit`
 };
 
@@ -55,12 +55,19 @@ export type GrepOptions = {
 };
 
 export type GrepPlatformResult = {
-  files: string[];                      // absolute paths with >=1 match
-  matches?: GrepMatch[];                // present iff contentMode
+  files: string[];                      // absolute paths with >=1 match, in final display order
+  matches?: GrepMatch[];                // present iff contentMode; grouped by file order, then line ascending
   truncated: boolean;
 };
 
 export interface Platform {
+  /** Resolve an absolute or platform-relative model path against this platform's cwd. */
+  resolvePath(path: string): string;
+
+  /** Format a resolved path for model output: cwd-relative when inside cwd,
+   *  "." when equal to cwd, otherwise unchanged absolute/canonical form. */
+  formatPath(path: string): string;
+
   /** Return the current working directory. Node's working-directory global is read only inside NodePlatform. */
   cwd(): string;
   readFile(path: string, encoding?: "utf-8"): Promise<string>;
@@ -68,15 +75,18 @@ export interface Platform {
   exec(command: string, options?: ExecOptions): Promise<ExecResult>;
 
   // --- new in fs-discovery ---
-  /** List the immediate entries of `path` (non-recursive). Rejects if `path`
-   *  does not exist or is not a directory. */
+  /** List the immediate entries of `path` (non-recursive) in final display order.
+   *  Rejects if `path` does not exist or is not a directory. */
   listDir(path: string): Promise<DirEntry[]>;
   /** Stat a single path. Rejects if it does not exist. */
   stat(path: string): Promise<DirEntry>;
-  /** Find files matching a glob pattern. See GlobOptions for ignore/hidden/cap. */
+  /** Find files matching a glob pattern in final display order.
+   *  See GlobOptions for ignore/hidden/cap. */
   glob(pattern: string, options?: GlobOptions): Promise<GlobResult>;
   /** Search file contents by regex source (JS RegExp syntax). `flags` is the
    *  RegExp flags string (e.g. "i" for case-insensitive; the tool derives it).
-   *  Rejects on invalid regex or when an explicit `options.path` does not exist. */
+   *  Files are in final display order; matches are grouped by that file order,
+   *  then line ascending. Rejects on invalid regex or when an explicit
+   *  `options.path` does not exist. */
   grep(pattern: string, flags: string, options?: GrepOptions): Promise<GrepPlatformResult>;
 }

@@ -56,7 +56,7 @@ class UsageThenThrowProvider implements Provider {
       yield { type: "tool_use", id: "c1", name: "ok_tool", input: {} };
       yield {
         type: "message_stop",
-        stopReason: "tool_use",
+        stopReason: { kind: "tool_use", raw: "tool_use" },
         usage: { inputTokens: 10, outputTokens: 5, cacheReadTokens: 0 },
       };
     } else {
@@ -94,6 +94,12 @@ class BlockingSignalHonoringProvider implements Provider {
 }
 
 class MockPlatform implements Platform {
+  resolvePath(path: string): string {
+    return path;
+  }
+  formatPath(path: string): string {
+    return path;
+  }
   cwd(): string {
     return "/work";
   }
@@ -172,7 +178,7 @@ function runParent(
     { type: "tool_use", id: "task1", name: opts?.toolName ?? "task", input: taskInput },
     {
       type: "message_stop",
-      stopReason: "tool_use",
+      stopReason: { kind: "tool_use", raw: "tool_use" },
       ...(opts?.parentTurn1Usage !== undefined ? { usage: opts.parentTurn1Usage } : {}),
     },
   ];
@@ -180,7 +186,7 @@ function runParent(
     { type: "text_delta", text: "parent done" },
     {
       type: "message_stop",
-      stopReason: "end_turn",
+      stopReason: { kind: "end_turn", raw: "end_turn" },
       ...(opts?.parentTurn2Usage !== undefined ? { usage: opts.parentTurn2Usage } : {}),
     },
   ];
@@ -237,7 +243,7 @@ describe("createTaskTool — T1-T9", () => {
       makeChild([
         [
           { type: "text_delta", text: "OK" },
-          { type: "message_stop", stopReason: "end_turn" },
+          { type: "message_stop", stopReason: { kind: "end_turn", raw: "end_turn" } },
         ],
       ]);
 
@@ -255,7 +261,7 @@ describe("createTaskTool — T1-T9", () => {
   // T2 — empty output (E8, microcopy)
   it("T2: an agent_done child with no assistant text returns the empty-output microcopy", async () => {
     const resolveChild = () =>
-      makeChild([[{ type: "message_stop", stopReason: "end_turn" }]]);
+      makeChild([[{ type: "message_stop", stopReason: { kind: "end_turn", raw: "end_turn" } }]]);
 
     const { events } = await runParent(resolveChild, { prompt: "p" });
 
@@ -305,7 +311,7 @@ describe("createTaskTool — T1-T9", () => {
           [
             { type: "text_delta", text: "partial progress" },
             { type: "tool_use", id: "x", name: "ok_tool", input: {} },
-            { type: "message_stop", stopReason: "tool_use" },
+            { type: "message_stop", stopReason: { kind: "tool_use", raw: "tool_use" } },
           ],
         ],
         { tools: [okTool], maxTurns: 1 },
@@ -328,7 +334,7 @@ describe("createTaskTool — T1-T9", () => {
     const childProvider = new MockProvider([
       [
         { type: "text_delta", text: "must not run" },
-        { type: "message_stop", stopReason: "end_turn" },
+        { type: "message_stop", stopReason: { kind: "end_turn", raw: "end_turn" } },
       ],
     ]);
     const resolveChild = (): Agent => {
@@ -366,7 +372,7 @@ describe("createTaskTool — T1-T9", () => {
       return makeChild([
         [
           { type: "text_delta", text: "child" },
-          { type: "message_stop", stopReason: "end_turn" },
+          { type: "message_stop", stopReason: { kind: "end_turn", raw: "end_turn" } },
         ],
       ]);
     };
@@ -402,7 +408,7 @@ describe("createTaskTool — T1-T9", () => {
       return makeChild([
         [
           { type: "text_delta", text: "child" },
-          { type: "message_stop", stopReason: "end_turn" },
+          { type: "message_stop", stopReason: { kind: "end_turn", raw: "end_turn" } },
         ],
       ]);
     };
@@ -433,7 +439,7 @@ describe("createTaskTool — T1-T9", () => {
       return makeChild([
         [
           { type: "text_delta", text: "child-ok" },
-          { type: "message_stop", stopReason: "end_turn" },
+          { type: "message_stop", stopReason: { kind: "end_turn", raw: "end_turn" } },
         ],
       ]);
     };
@@ -484,11 +490,11 @@ describe("createTaskTool — T1-T9", () => {
     const childScript: ProviderEvent[][] = [
       [
         { type: "tool_use", id: "recurse1", name: "task", input: { prompt: "again" } },
-        { type: "message_stop", stopReason: "tool_use" },
+        { type: "message_stop", stopReason: { kind: "tool_use", raw: "tool_use" } },
       ],
       [
         { type: "text_delta", text: "child final" },
-        { type: "message_stop", stopReason: "end_turn" },
+        { type: "message_stop", stopReason: { kind: "end_turn", raw: "end_turn" } },
       ],
     ];
 
@@ -515,11 +521,11 @@ describe("createTaskTool — T1-T9", () => {
         provider: new MockProvider([
           [
             { type: "tool_use", id: "recurse1", name: "task", input: { prompt: "again" } },
-            { type: "message_stop", stopReason: "tool_use" },
+            { type: "message_stop", stopReason: { kind: "tool_use", raw: "tool_use" } },
           ],
           [
             { type: "text_delta", text: "child final" },
-            { type: "message_stop", stopReason: "end_turn" },
+            { type: "message_stop", stopReason: { kind: "end_turn", raw: "end_turn" } },
           ],
         ]),
         tools: [],
@@ -552,6 +558,66 @@ describe("createTaskTool — T1-T9", () => {
 // SubagentChildEvent for every child run).
 // ===========================================================================
 
+describe("createTaskTool — sequential per-call attribution (CB-15)", () => {
+  it("runs two Task calls one at a time and keeps each child lifecycle under its spawning taskId", async () => {
+    let activeChildren = 0;
+    let maxActiveChildren = 0;
+    const resolutions: string[] = [];
+    const taskTool = createTaskTool({
+      resolveChild: ({ prompt }) => {
+        resolutions.push(prompt);
+        activeChildren++;
+        maxActiveChildren = Math.max(maxActiveChildren, activeChildren);
+        const provider: Provider = {
+          async *stream(): AsyncGenerator<ProviderEvent> {
+            yield { type: "text_delta", text: `child:${prompt}` };
+            await Promise.resolve();
+            activeChildren--;
+            yield { type: "message_stop", stopReason: { kind: "end_turn", raw: "end_turn" } };
+          },
+        };
+        return new Agent({ provider, tools: [], platform: new MockPlatform() });
+      },
+    });
+    const provider = new MockProvider([
+      [
+        { type: "tool_use", id: "task-a", name: "task", input: { prompt: "A" } },
+        { type: "tool_use", id: "task-b", name: "task", input: { prompt: "B" } },
+        { type: "message_stop", stopReason: { kind: "tool_use", raw: "tool_use" } },
+      ],
+      [
+        { type: "text_delta", text: "parent done" },
+        { type: "message_stop", stopReason: { kind: "end_turn", raw: "end_turn" } },
+      ],
+    ]);
+    const parent = new Agent({ provider, tools: [taskTool], platform: new MockPlatform() });
+
+    const { events } = await collectEvents(parent.run("go"));
+    const results = events.filter(
+      (event): event is Extract<AgentEvent, { type: "tool_result" }> =>
+        event.type === "tool_result" && event.toolName === "task",
+    );
+    const childText = events.filter(
+      (event): event is Extract<AgentEvent, { type: "subagent_event" }> =>
+        event.type === "subagent_event" && event.event.type === "text_delta",
+    );
+
+    expect(maxActiveChildren).toBe(1);
+    expect(resolutions).toEqual(["A", "B"]);
+    expect(results.map(({ toolCallId, result }) => [toolCallId, result])).toEqual([
+      ["task-a", "child:A"],
+      ["task-b", "child:B"],
+    ]);
+    expect(childText.map(({ taskId, event }) => [
+      taskId,
+      event.type === "text_delta" ? event.text : "",
+    ])).toEqual([
+      ["task-a", "child:A"],
+      ["task-b", "child:B"],
+    ]);
+  });
+});
+
 describe("createTaskTool — boundary invariants", () => {
   it("emits a sanitized `terminal` SubagentChildEvent for a completed child run", async () => {
     const resolveChild = () =>
@@ -560,7 +626,7 @@ describe("createTaskTool — boundary invariants", () => {
           { type: "text_delta", text: "hi" },
           {
             type: "message_stop",
-            stopReason: "end_turn",
+            stopReason: { kind: "end_turn", raw: "end_turn" },
             usage: { inputTokens: 7, outputTokens: 3, cacheReadTokens: 0 },
           },
         ],
@@ -576,6 +642,8 @@ describe("createTaskTool — boundary invariants", () => {
     }
     if (terminalEvent.event.type !== "terminal") throw new Error("unreachable");
     expect(terminalEvent.event.reason).toBe("agent_done");
+    if (terminalEvent.event.reason !== "agent_done") throw new Error("unreachable");
+    expect(terminalEvent.event.stopReason).toEqual({ kind: "end_turn", raw: "end_turn" });
     expect(terminalEvent.event.usage).toEqual({ inputTokens: 7, outputTokens: 3, cacheReadTokens: 0 });
     // taskId correlates to the spawning call.
     expect(terminalEvent.taskId).toBe("task1");
@@ -586,11 +654,11 @@ describe("createTaskTool — boundary invariants", () => {
       makeChild([
         [
           { type: "tool_use", id: "x", name: "ok_tool", input: { secret: "payload" } },
-          { type: "message_stop", stopReason: "tool_use" },
+          { type: "message_stop", stopReason: { kind: "tool_use", raw: "tool_use" } },
         ],
         [
           { type: "text_delta", text: "final" },
-          { type: "message_stop", stopReason: "end_turn" },
+          { type: "message_stop", stopReason: { kind: "end_turn", raw: "end_turn" } },
         ],
       ]);
 
@@ -662,11 +730,11 @@ describe("createTaskTool — numeric depth backstop (T-cov-2, D1)", () => {
       provider: new MockProvider([
         [
           { type: "tool_use", id: "g1", name: "task", input: { prompt: "spawn a grandchild" } },
-          { type: "message_stop", stopReason: "tool_use" },
+          { type: "message_stop", stopReason: { kind: "tool_use", raw: "tool_use" } },
         ],
         [
           { type: "text_delta", text: "child final" },
-          { type: "message_stop", stopReason: "end_turn" },
+          { type: "message_stop", stopReason: { kind: "end_turn", raw: "end_turn" } },
         ],
       ]),
       tools: [childTaskTool],
@@ -678,7 +746,7 @@ describe("createTaskTool — numeric depth backstop (T-cov-2, D1)", () => {
     const grandchildProvider = new MockProvider([
       [
         { type: "text_delta", text: "grandchild MUST NOT run" },
-        { type: "message_stop", stopReason: "end_turn" },
+        { type: "message_stop", stopReason: { kind: "end_turn", raw: "end_turn" } },
       ],
     ]);
     const childDirect = makeMisconfiguredChild(grandchildProvider);
@@ -701,7 +769,7 @@ describe("createTaskTool — numeric depth backstop (T-cov-2, D1)", () => {
     const grandchildProvider = new MockProvider([
       [
         { type: "text_delta", text: "grandchild MUST NOT run" },
-        { type: "message_stop", stopReason: "end_turn" },
+        { type: "message_stop", stopReason: { kind: "end_turn", raw: "end_turn" } },
       ],
     ]);
     const resolveChild = (): Agent => makeMisconfiguredChild(grandchildProvider);
@@ -735,7 +803,7 @@ describe("createTaskTool — numeric depth backstop (T-cov-2, D1)", () => {
     const grandchildProvider = new MockProvider([
       [
         { type: "text_delta", text: "grandchild ran" },
-        { type: "message_stop", stopReason: "end_turn" },
+        { type: "message_stop", stopReason: { kind: "end_turn", raw: "end_turn" } },
       ],
     ]);
     const childDirect = makeMisconfiguredChild(grandchildProvider, 2);
@@ -800,6 +868,7 @@ describe("mapChildTerminalToResult", () => {
       reason: "agent_done",
       messages: [{ role: "assistant", content: "the summary" }],
       usage: EMPTY_USAGE,
+      stopReason: { kind: "end_turn", raw: "end_turn" },
     };
     expect(mapChildTerminalToResult(terminal)).toEqual({ text: "the summary", isError: false });
   });
@@ -863,13 +932,18 @@ describe("sanitizeChildEvent", () => {
     expect(out && "result" in out).toBe(false);
   });
 
-  it("maps agent_done to a terminal event carrying usage", () => {
+  it("maps agent_done to a reason-bearing terminal and strips messages", () => {
     const usage = { inputTokens: 1, outputTokens: 2, cacheReadTokens: 0 };
-    expect(sanitizeChildEvent({ type: "agent_done", messages: [], usage })).toEqual({
-      type: "terminal",
-      reason: "agent_done",
+    const stopReason = { kind: "refusal", raw: "refusal" } as const;
+    const out = sanitizeChildEvent({
+      type: "agent_done",
+      messages: [{ role: "assistant", content: "private transcript" }],
       usage,
+      stopReason,
     });
+    expect(out).toEqual({ type: "terminal", reason: "agent_done", usage, stopReason });
+    expect(out && "messages" in out).toBe(false);
+    expect(out && "result" in out).toBe(false);
   });
 
   it("maps max_turns_exceeded to a terminal event carrying usage", () => {
@@ -887,7 +961,11 @@ describe("sanitizeChildEvent", () => {
   });
 
   it("drops turn_complete (returns undefined)", () => {
-    expect(sanitizeChildEvent({ type: "turn_complete", turnIndex: 0 })).toBeUndefined();
+    expect(sanitizeChildEvent({
+      type: "turn_complete",
+      turnIndex: 0,
+      stopReason: { kind: "end_turn", raw: "end_turn" },
+    })).toBeUndefined();
   });
 
   it("drops subagent_event, preventing grandchild-event nesting (returns undefined)", () => {

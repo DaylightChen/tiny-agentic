@@ -1,118 +1,428 @@
-import type { AgentEvent } from "../types/events.js";
+import type { AgentEvent, SubagentChildEvent } from "../types/events.js";
 import type { Platform } from "../types/platform.js";
-import type { ApprovalDecision, ApprovalHandler, ToolCallContext } from "../types/tool.js";
+import type { ApprovalDecision, ApprovalHandler, Tool, ToolCallContext } from "../types/tool.js";
+import type { Usage } from "../types/usage.js";
 import { ToolRegistry } from "../tools/registry.js";
 
-type ToolUseEntry = { id: string; name: string; input: unknown; parseError?: boolean };
+type ToolUseEntry = {
+  id: string;
+  name: string;
+  input: unknown;
+  parseError?: boolean;
+};
+
+type ToolResultEvent = Extract<AgentEvent, { type: "tool_result" }>;
+
+type ToolExecution = {
+  event: ToolResultEvent;
+  childEvents: SubagentChildEvent[];
+  reportedUsage: Usage[];
+};
+
+type PreparedExecution = {
+  toolUse: ToolUseEntry;
+  tool: Tool;
+  input: unknown;
+  concurrencySafe: boolean;
+  context: ToolCallContext;
+  childEvents: SubagentChildEvent[];
+  reportedUsage: Usage[];
+};
+
+function emptyExecution(event: ToolResultEvent): ToolExecution {
+  return { event, childEvents: [], reportedUsage: [] };
+}
+
+function cancelledExecution(toolUse: ToolUseEntry): ToolExecution {
+  return emptyExecution({
+    type: "tool_result",
+    toolName: toolUse.name,
+    toolCallId: toolUse.id,
+    result: `Tool '${toolUse.name}': call cancelled before start`,
+    isError: true,
+  });
+}
+
+function isAborted(signal: AbortSignal | undefined): boolean {
+  return signal?.aborted === true;
+}
+
+function unstartedCancellations(
+  safeBatch: PreparedExecution[],
+  toolUses: ToolUseEntry[],
+  index: number,
+): ToolExecution[] {
+  return [
+    ...safeBatch.map((prepared) => cancelledExecution(prepared.toolUse)),
+    ...toolUses.slice(index).map(cancelledExecution),
+  ];
+}
+
+function prepareExecution(
+  toolUse: ToolUseEntry,
+  tool: Tool,
+  input: unknown,
+  concurrencySafe: boolean,
+  baseContext: ToolCallContext,
+): PreparedExecution {
+  const childEvents: SubagentChildEvent[] = [];
+  const reportedUsage: Usage[] = [];
+  const context: ToolCallContext = {
+    ...baseContext,
+    toolCallId: toolUse.id,
+    reportUsage: (usage) => {
+      reportedUsage.push(usage);
+    },
+    emitEvent: (event) => {
+      childEvents.push(event);
+    },
+  };
+
+  return {
+    toolUse,
+    tool,
+    input,
+    concurrencySafe,
+    context,
+    childEvents,
+    reportedUsage,
+  };
+}
+
+async function approvePrepared(
+  prepared: PreparedExecution,
+  approvalHandler: ApprovalHandler | undefined,
+): Promise<ToolExecution | undefined> {
+  if (approvalHandler === undefined) return undefined;
+
+  let decision: ApprovalDecision;
+  try {
+    decision = await approvalHandler(prepared.tool.name, prepared.input);
+  } catch (err) {
+    return {
+      event: {
+        type: "tool_result",
+        toolName: prepared.tool.name,
+        toolCallId: prepared.toolUse.id,
+        result: `Tool '${prepared.tool.name}': approval check failed — ${err instanceof Error ? err.message : String(err)}`,
+        isError: true,
+      },
+      childEvents: prepared.childEvents,
+      reportedUsage: prepared.reportedUsage,
+    };
+  }
+
+  if (decision === "allow") return undefined;
+
+  return {
+    event: {
+      type: "tool_result",
+      toolName: prepared.tool.name,
+      toolCallId: prepared.toolUse.id,
+      result: `Tool '${prepared.tool.name}': call denied by approvalHandler`,
+      isError: true,
+    },
+    childEvents: prepared.childEvents,
+    reportedUsage: prepared.reportedUsage,
+  };
+}
+
+async function executePrepared(
+  prepared: PreparedExecution,
+  platform: Platform,
+): Promise<ToolExecution> {
+  try {
+    const result = await prepared.tool.call(
+      prepared.input,
+      platform,
+      prepared.context,
+    );
+    return {
+      event: {
+        type: "tool_result",
+        toolName: prepared.tool.name,
+        toolCallId: prepared.toolUse.id,
+        result,
+        isError: false,
+      },
+      childEvents: prepared.childEvents,
+      reportedUsage: prepared.reportedUsage,
+    };
+  } catch (err) {
+    return {
+      event: {
+        type: "tool_result",
+        toolName: prepared.tool.name,
+        toolCallId: prepared.toolUse.id,
+        result: err instanceof Error ? err.message : String(err),
+        isError: true,
+      },
+      childEvents: prepared.childEvents,
+      reportedUsage: prepared.reportedUsage,
+    };
+  }
+}
+
+function rejectedExecution(
+  prepared: PreparedExecution,
+  reason: unknown,
+): ToolExecution {
+  return {
+    event: {
+      type: "tool_result",
+      toolName: prepared.tool.name,
+      toolCallId: prepared.toolUse.id,
+      result: reason instanceof Error ? reason.message : String(reason),
+      isError: true,
+    },
+    childEvents: prepared.childEvents,
+    reportedUsage: prepared.reportedUsage,
+  };
+}
+
+async function executeBatch(
+  batch: PreparedExecution[],
+  platform: Platform,
+  signal: AbortSignal | undefined,
+): Promise<ToolExecution[]> {
+  const executions: Array<ToolExecution | undefined> = new Array(batch.length);
+  const startedIndexes: number[] = [];
+  const promises: Promise<ToolExecution>[] = [];
+  let cancellationObserved = false;
+
+  for (let index = 0; index < batch.length; index++) {
+    const prepared = batch[index]!;
+    if (cancellationObserved || isAborted(signal)) {
+      cancellationObserved = true;
+      executions[index] = cancelledExecution(prepared.toolUse);
+      continue;
+    }
+
+    startedIndexes.push(index);
+    promises.push(executePrepared(prepared, platform));
+  }
+
+  const settlements = await Promise.allSettled(promises);
+  for (let index = 0; index < settlements.length; index++) {
+    const settlement = settlements[index]!;
+    const batchIndex = startedIndexes[index]!;
+    const prepared = batch[batchIndex]!;
+    executions[batchIndex] = settlement.status === "fulfilled"
+      ? settlement.value
+      : rejectedExecution(prepared, settlement.reason);
+  }
+
+  return batch.map((prepared, index) =>
+    executions[index] ?? cancelledExecution(prepared.toolUse)
+  );
+}
 
 /**
- * Sequential tool execution for M1.
- * Yields tool_result AgentEvents as each tool completes.
- * M2: add isConcurrencySafe() batching here — check tool.isConcurrencySafe?.(input)
- * and run safe calls via Promise.all — without changing this call site.
+ * Lazily prepares calls in model order. Approved safe calls form maximal batches;
+ * every other outcome is a barrier, and isolated envelopes always yield in input order.
  */
 export async function* runTools(
   toolUses: ToolUseEntry[],
   registry: ToolRegistry,
   platform: Platform,
-  context: ToolCallContext,
+  baseContext: ToolCallContext,
   approvalHandler?: ApprovalHandler,
-): AsyncGenerator<AgentEvent> {
-  for (const tu of toolUses) {
-    // Correlation id for the currently-executing call (a tool reads it as its
-    // own tool-use id, e.g. the task tool's `taskId`). Set per tool-use and
-    // cleared in the finally so the early-return branches below (unknown tool,
-    // parse failure, validation failure, denied approval) cannot leak this id
-    // into a later call's context.
-    context.toolCallId = tu.id;
-    try {
-      const tool = registry.findByName(tu.name);
+): AsyncGenerator<ToolExecution> {
+  let index = 0;
+  let safeBatch: PreparedExecution[] = [];
 
-      if (tool === undefined) {
-        yield {
-          type: "tool_result",
-          toolName: tu.name,
-          toolCallId: tu.id,
-          result: `Unknown tool: '${tu.name}'`,
-          isError: true,
-        };
-        continue;
+  while (index < toolUses.length) {
+    if (isAborted(baseContext.signal)) {
+      for (const execution of unstartedCancellations(safeBatch, toolUses, index)) {
+        yield execution;
       }
+      return;
+    }
 
-      // Malformed streamed tool input (§6.1). The mapper could not JSON.parse the
-      // accumulated input_json_delta and flagged this entry with parseError: true
-      // (its `input` is a placeholder {}). Detect it BEFORE Zod so the model gets
-      // the dedicated parse-error message, not an ambiguous Zod validation failure.
-      if (tu.parseError) {
-        yield {
-          type: "tool_result",
-          toolName: tool.name,
-          toolCallId: tu.id,
-          result: `Tool '${tool.name}': could not parse tool input as JSON`,
-          isError: true,
-        };
-        continue;
-      }
+    const toolUse = toolUses[index];
+    if (toolUse === undefined) break;
 
-      const parseResult = tool.inputSchema.safeParse(tu.input);
+    const tool = registry.findByName(toolUse.name);
+    let preparationError: ToolExecution | undefined;
+    let prepared: PreparedExecution | undefined;
+
+    if (tool === undefined) {
+      preparationError = emptyExecution({
+        type: "tool_result",
+        toolName: toolUse.name,
+        toolCallId: toolUse.id,
+        result: `Unknown tool: '${toolUse.name}'`,
+        isError: true,
+      });
+    } else if (toolUse.parseError) {
+      preparationError = emptyExecution({
+        type: "tool_result",
+        toolName: tool.name,
+        toolCallId: toolUse.id,
+        result: `Tool '${tool.name}': could not parse tool input as JSON`,
+        isError: true,
+      });
+    } else {
+      const parseResult = tool.inputSchema.safeParse(toolUse.input);
       if (!parseResult.success) {
-        yield {
+        preparationError = emptyExecution({
           type: "tool_result",
           toolName: tool.name,
-          toolCallId: tu.id,
+          toolCallId: toolUse.id,
           result: `Tool '${tool.name}': invalid input — ${parseResult.error.message}`,
           isError: true,
-        };
-        continue;
-      }
-
-      // Approval gate — runs after Zod validation, before tool.call
-      if (approvalHandler !== undefined) {
-        let decision: ApprovalDecision;
+        });
+      } else {
+        let concurrencySafe: boolean | undefined;
         try {
-          decision = await approvalHandler(tool.name, parseResult.data);
+          concurrencySafe = tool.isConcurrencySafe?.(parseResult.data) === true;
         } catch (err) {
-          yield {
+          preparationError = emptyExecution({
             type: "tool_result",
             toolName: tool.name,
-            toolCallId: tu.id,
-            result: `Tool '${tool.name}': approval check failed — ${err instanceof Error ? err.message : String(err)}`,
+            toolCallId: toolUse.id,
+            result: `Tool '${tool.name}': concurrency safety check failed — ${err instanceof Error ? err.message : String(err)}`,
             isError: true,
-          };
-          continue;
+          });
         }
-        if (decision !== 'allow') {
-          yield {
-            type: "tool_result",
-            toolName: tool.name,
-            toolCallId: tu.id,
-            result: `Tool '${tool.name}': call denied by approvalHandler`,
-            isError: true,
-          };
-          continue;
+
+        if (concurrencySafe !== undefined) {
+          prepared = prepareExecution(
+            toolUse,
+            tool,
+            parseResult.data,
+            concurrencySafe,
+            baseContext,
+          );
+        }
+      }
+    }
+
+    if (preparationError !== undefined) {
+      if (safeBatch.length > 0) {
+        if (isAborted(baseContext.signal)) {
+          for (const execution of unstartedCancellations(safeBatch, toolUses, index)) {
+            yield execution;
+          }
+          return;
+        }
+
+        const batch = safeBatch;
+        safeBatch = [];
+        const executions = await executeBatch(batch, platform, baseContext.signal);
+        for (const execution of executions) yield execution;
+
+        if (isAborted(baseContext.signal)) {
+          for (const execution of toolUses.slice(index).map(cancelledExecution)) {
+            yield execution;
+          }
+          return;
         }
       }
 
-      try {
-        const result = await tool.call(parseResult.data, platform, context);
-        yield {
-          type: "tool_result",
-          toolName: tool.name,
-          toolCallId: tu.id,
-          result,
-          isError: false,
-        };
-      } catch (err) {
-        yield {
-          type: "tool_result",
-          toolName: tool.name,
-          toolCallId: tu.id,
-          result: err instanceof Error ? err.message : String(err),
-          isError: true,
-        };
-      }
-    } finally {
-      delete context.toolCallId;
+      yield preparationError;
+      index += 1;
+      continue;
     }
+
+    if (prepared === undefined) break;
+
+    if (!prepared.concurrencySafe) {
+      if (safeBatch.length > 0) {
+        if (isAborted(baseContext.signal)) {
+          for (const execution of unstartedCancellations(safeBatch, toolUses, index)) {
+            yield execution;
+          }
+          return;
+        }
+
+        const batch = safeBatch;
+        safeBatch = [];
+        const executions = await executeBatch(batch, platform, baseContext.signal);
+        for (const execution of executions) yield execution;
+
+        if (isAborted(baseContext.signal)) {
+          for (const execution of toolUses.slice(index).map(cancelledExecution)) {
+            yield execution;
+          }
+          return;
+        }
+      }
+
+      const approvalError = await approvePrepared(prepared, approvalHandler);
+      if (isAborted(baseContext.signal)) {
+        for (const execution of toolUses.slice(index).map(cancelledExecution)) {
+          yield execution;
+        }
+        return;
+      }
+
+      if (approvalError !== undefined) {
+        yield approvalError;
+      } else {
+        if (isAborted(baseContext.signal)) {
+          for (const execution of toolUses.slice(index).map(cancelledExecution)) {
+            yield execution;
+          }
+          return;
+        }
+
+        const executions = await executeBatch([prepared], platform, baseContext.signal);
+        const execution = executions[0];
+        if (execution !== undefined) yield execution;
+      }
+      index += 1;
+      continue;
+    }
+
+    const approvalError = await approvePrepared(prepared, approvalHandler);
+    if (isAborted(baseContext.signal)) {
+      for (const execution of unstartedCancellations(safeBatch, toolUses, index)) {
+        yield execution;
+      }
+      return;
+    }
+
+    if (approvalError !== undefined) {
+      if (safeBatch.length > 0) {
+        if (isAborted(baseContext.signal)) {
+          for (const execution of unstartedCancellations(safeBatch, toolUses, index)) {
+            yield execution;
+          }
+          return;
+        }
+
+        const batch = safeBatch;
+        safeBatch = [];
+        const executions = await executeBatch(batch, platform, baseContext.signal);
+        for (const execution of executions) yield execution;
+
+        if (isAborted(baseContext.signal)) {
+          for (const execution of toolUses.slice(index).map(cancelledExecution)) {
+            yield execution;
+          }
+          return;
+        }
+      }
+
+      yield approvalError;
+      index += 1;
+      continue;
+    }
+
+    safeBatch.push(prepared);
+    index += 1;
+  }
+
+  if (safeBatch.length > 0) {
+    if (isAborted(baseContext.signal)) {
+      for (const execution of safeBatch.map((prepared) => cancelledExecution(prepared.toolUse))) {
+        yield execution;
+      }
+      return;
+    }
+
+    const executions = await executeBatch(safeBatch, platform, baseContext.signal);
+    for (const execution of executions) yield execution;
   }
 }

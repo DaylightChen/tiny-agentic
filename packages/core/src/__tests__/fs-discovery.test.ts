@@ -1,5 +1,4 @@
-import { describe, it, expect, beforeEach, afterEach } from "vitest";
-import { join } from "node:path";
+import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 
 import { NodePlatform } from "../platform/node.js";
 
@@ -12,9 +11,13 @@ import { NodePlatform } from "../platform/node.js";
  * primitives — platform.exec("mkdir -p …" / "ln -s …" / "printf …") and
  * platform.writeFile — mirroring node.test.ts (task-01).
  *
- * Vitest sets NODE_ENV="test", so fs-discovery sorts name-asc deterministically.
+ * Vitest sets NODE_ENV="test", so NodePlatform discovery returns path-ascending order.
  */
 const platform = new NodePlatform();
+
+function join(base: string, ...parts: string[]): string {
+  return [base.replace(/\/$/, ""), ...parts].join("/");
+}
 
 async function makeTempDir(): Promise<string> {
   const { stdout, exitCode } = await platform.exec("mktemp -d", { shell: true });
@@ -197,24 +200,59 @@ describe("fs-discovery — symlinks", () => {
   });
 });
 
-describe("fs-discovery — ordering (NODE_ENV=test)", () => {
+describe("fs-discovery — ordering", () => {
   let dir: string;
   beforeEach(async () => {
     dir = await makeTempDir();
   });
   afterEach(async () => {
+    vi.unstubAllEnvs();
     await removeDir(dir);
   });
 
-  it("returns results name-asc and stable across two runs", async () => {
-    for (const n of ["m.txt", "a.txt", "z.txt", "b.txt"]) {
-      await platform.writeFile(join(dir, n), "x");
+  it("returns test-mode glob and grep paths ascending regardless of mtime", async () => {
+    for (const n of ["a-old.txt", "z-new.txt", "m-middle.txt"]) {
+      await platform.writeFile(join(dir, n), "needle\n");
     }
-    const r1 = await platform.glob("*.txt", { cwd: dir });
-    const r2 = await platform.glob("*.txt", { cwd: dir });
+    const { exitCode } = await platform.exec(
+      `touch -t 202001010000 ${join(dir, "a-old.txt")} && ` +
+        `touch -t 202201010000 ${join(dir, "m-middle.txt")} && ` +
+        `touch -t 202401010000 ${join(dir, "z-new.txt")}`,
+      { shell: true },
+    );
+    expect(exitCode).toBe(0);
 
-    expect(basenames(r1.paths)).toEqual(["a.txt", "b.txt", "m.txt", "z.txt"]);
-    expect(r1.paths).toEqual(r2.paths);
+    const glob = await platform.glob("*.txt", { cwd: dir });
+    const grep = await platform.grep("needle", "", { cwd: dir });
+
+    expect(basenames(glob.paths)).toEqual(["a-old.txt", "m-middle.txt", "z-new.txt"]);
+    expect(basenames(grep.files)).toEqual(["a-old.txt", "m-middle.txt", "z-new.txt"]);
+  });
+
+  it("orders production glob and grep by descending mtime with an ascending full-path tie", async () => {
+    vi.stubEnv("NODE_ENV", "production");
+    for (const relativePath of ["z-old.txt", "sub/b-tied.txt", "sub/a-tied.txt"]) {
+      const slash = relativePath.lastIndexOf("/");
+      if (slash !== -1) await mkdirp(join(dir, relativePath.slice(0, slash)));
+      await platform.writeFile(join(dir, relativePath), "needle\n");
+    }
+    const { exitCode } = await platform.exec(
+      `touch -t 202001010000 ${join(dir, "z-old.txt")} && ` +
+        `touch -t 202401010000 ${join(dir, "sub/b-tied.txt")} ${join(dir, "sub/a-tied.txt")}`,
+      { shell: true },
+    );
+    expect(exitCode).toBe(0);
+
+    const glob = await platform.glob("**/*.txt", { cwd: dir });
+    const grep = await platform.grep("needle", "", { cwd: dir });
+    const expected = [
+      join(dir, "sub/a-tied.txt"),
+      join(dir, "sub/b-tied.txt"),
+      join(dir, "z-old.txt"),
+    ];
+
+    expect(glob.paths).toEqual(expected);
+    expect(grep.files).toEqual(expected);
   });
 });
 

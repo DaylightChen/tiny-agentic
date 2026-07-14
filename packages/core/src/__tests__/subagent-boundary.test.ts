@@ -49,6 +49,12 @@ class MockProvider implements Provider {
 }
 
 class MockPlatform implements Platform {
+  resolvePath(path: string): string {
+    return path;
+  }
+  formatPath(path: string): string {
+    return path;
+  }
   cwd(): string {
     return "/work";
   }
@@ -99,7 +105,7 @@ function makeLeakyChild(): Agent {
       { type: "tool_use", id: "child_tool_1", name: "leaky_child_tool", input: {} },
       {
         type: "message_stop",
-        stopReason: "tool_use",
+        stopReason: { kind: "tool_use", raw: "tool_use" },
         usage: { inputTokens: 8, outputTokens: 4, cacheReadTokens: 0 },
       },
     ],
@@ -107,7 +113,7 @@ function makeLeakyChild(): Agent {
       { type: "text_delta", text: "child final answer" },
       {
         type: "message_stop",
-        stopReason: "end_turn",
+        stopReason: { kind: "end_turn", raw: "end_turn" },
         usage: { inputTokens: 2, outputTokens: 1, cacheReadTokens: 0 },
       },
     ],
@@ -131,7 +137,7 @@ function runParentWithLeakyChild(): Promise<{ events: AgentEvent[]; terminal: Te
       { type: "tool_use", id: "task1", name: "task", input: { description: "d", prompt: "sub" } },
       {
         type: "message_stop",
-        stopReason: "tool_use",
+        stopReason: { kind: "tool_use", raw: "tool_use" },
         usage: { inputTokens: 100, outputTokens: 50, cacheReadTokens: 0 },
       },
     ],
@@ -139,7 +145,7 @@ function runParentWithLeakyChild(): Promise<{ events: AgentEvent[]; terminal: Te
       { type: "text_delta", text: "parent done" },
       {
         type: "message_stop",
-        stopReason: "end_turn",
+        stopReason: { kind: "end_turn", raw: "end_turn" },
         usage: { inputTokens: 1, outputTokens: 1, cacheReadTokens: 0 },
       },
     ],
@@ -249,7 +255,7 @@ describe("subagent boundary — T10-T12 (leak-proof, end-to-end)", () => {
   });
 
   // T12 — terminal reduced (data model).
-  it("T12: the child terminal subagent_event is reduced to {type, reason, usage, errorMessage?} only", async () => {
+  it("T12: successful child terminal is reduced and preserves only its structured stop reason", async () => {
     const { events } = await runParentWithLeakyChild();
 
     const terminalEvent = subagentEvents(events).find((se) => se.event.type === "terminal");
@@ -258,7 +264,7 @@ describe("subagent boundary — T10-T12 (leak-proof, end-to-end)", () => {
     if (child.type !== "terminal") throw new Error("unreachable");
 
     // Only keys within the allowed set — no `messages`, no provider-native field.
-    const allowed = new Set(["type", "reason", "usage", "errorMessage"]);
+    const allowed = new Set(["type", "reason", "usage", "stopReason"]);
     for (const key of Object.keys(child)) {
       expect(allowed.has(key)).toBe(true);
     }
@@ -267,6 +273,8 @@ describe("subagent boundary — T10-T12 (leak-proof, end-to-end)", () => {
     // reason is one of the three allowed terminal reasons.
     expect(["agent_done", "max_turns_exceeded", "agent_error"]).toContain(child.reason);
     expect(child.reason).toBe("agent_done");
+    if (child.reason !== "agent_done") throw new Error("unreachable");
+    expect(child.stopReason).toEqual({ kind: "end_turn", raw: "end_turn" });
 
     // usage is a Usage-shaped object (the three base fields present, numeric) and
     // equals the child's rolled-up usage (8/4 + 2/1 = 10/5).
@@ -277,6 +285,26 @@ describe("subagent boundary — T10-T12 (leak-proof, end-to-end)", () => {
 
     // agent_done has no errorMessage.
     expect("errorMessage" in child).toBe(false);
+  });
+
+  it("CB-13: child events stay ordered before their matching task result with the spawning taskId", async () => {
+    const { events } = await runParentWithLeakyChild();
+    const resultIndex = events.findIndex(
+      (event) => event.type === "tool_result" && event.toolName === "task",
+    );
+    const childIndices = events
+      .map((event, index) => event.type === "subagent_event" ? index : -1)
+      .filter((index) => index >= 0);
+
+    expect(resultIndex).toBeGreaterThanOrEqual(0);
+    expect(childIndices.length).toBeGreaterThan(0);
+    for (const index of childIndices) {
+      const event = events[index];
+      if (event?.type !== "subagent_event") throw new Error("expected subagent_event");
+      expect(event.taskId).toBe("task1");
+      expect(index).toBeLessThan(resultIndex);
+    }
+    expect(childIndices).toEqual([...childIndices].sort((a, b) => a - b));
   });
 
   // Optional hardening — sanitization must not have broken the usage roll-up.

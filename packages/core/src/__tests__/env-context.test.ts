@@ -32,6 +32,14 @@ class MockPlatform implements Platform {
     this.throwOnExec = throwOnExec;
   }
 
+  resolvePath(path: string): string {
+    return path;
+  }
+
+  formatPath(path: string): string {
+    return path;
+  }
+
   cwd(): string {
     return this.fakeCwd;
   }

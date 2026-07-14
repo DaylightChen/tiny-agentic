@@ -65,6 +65,8 @@ function makeMockPlatform() {
   const execCalls: Array<{ cmd: string; opts: ExecOptions | undefined }> = [];
 
   const platform: Platform = {
+    resolvePath: (path: string) => path,
+    formatPath: (path: string) => path,
     cwd: () => "/work",
     readFile: (_path: string) => Promise.reject(new Error("readFile not used")),
     writeFile: (_path: string, _content: string): Promise<void> => Promise.resolve(),
@@ -110,12 +112,12 @@ function makeBashToolProvider(toolId = "t-bash-1") {
         name: "bash",
         input: { command: "echo hi" },
       },
-      { type: "message_stop", stopReason: "tool_use" },
+      { type: "message_stop", stopReason: { kind: "tool_use", raw: "tool_use" } },
     ],
     // Turn 2: model responds after seeing tool result
     [
       { type: "text_delta", text: "Done." },
-      { type: "message_stop", stopReason: "end_turn" },
+      { type: "message_stop", stopReason: { kind: "end_turn", raw: "end_turn" } },
     ],
   ]);
 }

@@ -19,6 +19,14 @@ class MockPlatform implements Platform {
     this.exec = execImpl;
   }
 
+  resolvePath(path: string): string {
+    return path;
+  }
+
+  formatPath(path: string): string {
+    return path;
+  }
+
   cwd(): string {
     return "/work";
   }

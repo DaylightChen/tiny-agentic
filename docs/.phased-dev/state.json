@@ -1,5 +1,5 @@
 {
   "schemaVersion": 1,
-  "activeScope": "feature/fs-discovery-tools",
-  "scopes": ["project", "feature/openai-provider", "feature/agent-tooling", "feature/core-run-controls", "feature/task-tool", "feature/fs-discovery-tools"]
+  "activeScope": "feature/core-runtime-hardening",
+  "scopes": ["project", "feature/openai-provider", "feature/agent-tooling", "feature/core-run-controls", "feature/task-tool", "feature/fs-discovery-tools", "feature/core-runtime-hardening"]
 }

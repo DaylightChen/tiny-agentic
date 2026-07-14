@@ -5,6 +5,36 @@ All notable changes to `tiny-agentic` are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.0] — Unreleased
+
+### Added
+
+- Sub-agent delegation through `createTaskTool`, including host-owned child configuration, sanitized child lifecycle events, linked cancellation, recursion safeguards, and child-usage roll-up.
+- Structured filesystem discovery tools: `ls`, `glob`, and `grep`, with hidden-file and nested-`.gitignore` controls, bounded output, and Platform-owned ordering.
+- Observation-only `reasoning_delta` events for provider reasoning streams.
+- Public `StopReasonKind` and `StopReason` types with normalized categories and exact native `raw` fallback data.
+- Root `typecheck:examples` verification for all shipped examples.
+
+### Changed
+
+- Approved contiguous calls to `read_file`, `ls`, `glob`, and `grep` execute in maximal concurrency-safe batches with no framework cap. Approvals stay serial; unsafe, invalid, denied, and failed calls are ordering barriers; Task remains sequential.
+- Tool execution now isolates per-call context, child events, and reported usage while preserving model-call result and serialization order.
+- `Platform` owns model-path resolution, output formatting, and final discovery ordering. The main package graph no longer imports Node built-ins or reads process globals; Node behavior remains in the explicit platform subpath.
+- Documentation and examples now cover the complete event, terminal, approval, Platform, usage, cancellation, Task, and safe-batching contracts.
+
+### Fixed
+
+- Provider stop outcomes are no longer discarded. Every completed provider turn, final successful agent event/terminal, and successful sanitized child terminal carries the normalized stop reason.
+- Unknown or missing provider-native stop values are preserved as `kind: "other"` with their exact string or `null`, instead of being mislabeled as natural completion.
+- Node discovery ordering now has deterministic ascending code-unit tie-breaks for equal modification times, and model-facing tools preserve Platform order.
+- Cancellation starts no new tool work after abort is observed, emits ordered results for unstarted calls, and delivers the signal to active calls while allowing signal-free read/list syscalls to finish.
+
+### Breaking changes
+
+- Custom `Provider` implementations must emit `ProviderEvent` `message_stop` with required `stopReason: StopReason`. A stream ending without `message_stop` is now a provider contract error.
+- `AgentEvent.turn_complete`, `AgentEvent.agent_done`, the `Terminal` `agent_done` arm, and successful child terminal events now require `stopReason`. Max-turn and error variants intentionally do not expose it.
+- Custom `Platform` implementations must add `resolvePath(path)` and `formatPath(path)`, and must return `listDir`, `glob`, and `grep` data in final display order (`grep` matches grouped by file order, then line ascending).
+
 ## [0.1.0] — 2026-07-06
 
 Initial public release: a headless, UI-free agentic engine for TypeScript/Node.

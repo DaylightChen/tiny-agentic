@@ -1,11 +1,11 @@
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, vi } from "vitest";
 import { z } from "zod";
 
 import { agentLoop } from "../loop/loop.js";
 import type { LoopParams } from "../loop/loop.js";
 import { collectEvents } from "../utils/collect.js";
 import { ToolRegistry } from "../tools/registry.js";
-import { defineTool } from "../types/tool.js";
+import { defineTool, type ToolCallContext } from "../types/tool.js";
 import type { Provider, ProviderEvent, ProviderRequest } from "../types/provider.js";
 import type { Platform, ExecResult } from "../types/platform.js";
 import type { Message, ToolResultBlock } from "../types/messages.js";
@@ -43,6 +43,12 @@ class ThrowingProvider implements Provider {
 }
 
 class MockPlatform implements Platform {
+  resolvePath(path: string): string {
+    return path;
+  }
+  formatPath(path: string): string {
+    return path;
+  }
   cwd(): string {
     return "/work";
   }
@@ -86,6 +92,34 @@ function makeParams(
   };
 }
 
+type Deferred<T = void> = {
+  promise: Promise<T>;
+  resolve: (value?: T) => void;
+  reject: (reason: unknown) => void;
+};
+
+function deferred<T = void>(): Deferred<T> {
+  let resolve!: (value?: T) => void;
+  let reject!: (reason: unknown) => void;
+  const promise = new Promise<T>((resolvePromise, rejectPromise) => {
+    resolve = (value) => resolvePromise(value as T);
+    reject = rejectPromise;
+  });
+  return { promise, resolve, reject };
+}
+
+function makeStartedLatch(expected: number): { started: () => void; allStarted: Promise<void> } {
+  const latch = deferred();
+  let count = 0;
+  return {
+    started: () => {
+      count += 1;
+      if (count === expected) latch.resolve();
+    },
+    allStarted: latch.promise,
+  };
+}
+
 const okTool = defineTool({
   name: "ok_tool",
   description: "returns ok",
@@ -98,7 +132,7 @@ describe("agentLoop", () => {
     const provider = new MockProvider([
       [
         { type: "text_delta", text: "hi" },
-        { type: "message_stop", stopReason: "end_turn" },
+        { type: "message_stop", stopReason: { kind: "end_turn", raw: "end_turn" } },
       ],
     ]);
     const params = makeParams(provider, new ToolRegistry([]));
@@ -117,12 +151,74 @@ describe("agentLoop", () => {
     expect(terminal.reason).toBe("agent_done");
   });
 
+  it("propagates the identical final StopReason object to turn_complete, agent_done, and Terminal (SR-5)", async () => {
+    const stopReason = { kind: "end_turn", raw: "end_turn" } as const;
+    const provider = new MockProvider([
+      [
+        { type: "text_delta", text: "final" },
+        { type: "message_stop", stopReason },
+      ],
+    ]);
+
+    const { events, terminal } = await collectEvents(
+      agentLoop(makeParams(provider, new ToolRegistry([]))),
+    );
+    const turnComplete = events.find((event) => event.type === "turn_complete");
+    const done = events.find((event) => event.type === "agent_done");
+    if (turnComplete?.type !== "turn_complete" || done?.type !== "agent_done") {
+      throw new Error("expected completion events");
+    }
+    if (terminal.reason !== "agent_done") throw new Error("expected successful terminal");
+
+    expect(turnComplete.stopReason).toEqual(stopReason);
+    expect(done.stopReason).toEqual(stopReason);
+    expect(terminal.stopReason).toEqual(stopReason);
+    expect(turnComplete.stopReason).toBe(stopReason);
+    expect(done.stopReason).toBe(stopReason);
+    expect(terminal.stopReason).toBe(stopReason);
+  });
+
+  it.each([
+    ["max_tokens", "max_tokens"],
+    ["model_context_window_exceeded", "model_context_window_exceeded"],
+    ["content_filter", "content_filter"],
+    ["refusal", "refusal"],
+    ["other", "vendor_future_stop"],
+  ] as const)("treats %s as a valid partial completion with text and usage (SR-6)", async (kind, raw) => {
+    const stopReason = { kind, raw };
+    const usage = { inputTokens: 11, outputTokens: 7, cacheReadTokens: 2 };
+    const provider = new MockProvider([
+      [
+        { type: "text_delta", text: "partial output" },
+        { type: "message_stop", stopReason, usage },
+      ],
+    ]);
+
+    const { events, terminal } = await collectEvents(
+      agentLoop(makeParams(provider, new ToolRegistry([]))),
+    );
+
+    expect(events.some((event) => event.type === "agent_error")).toBe(false);
+    expect(events).toContainEqual({ type: "text_delta", text: "partial output" });
+    const done = events.find((event) => event.type === "agent_done");
+    if (done?.type !== "agent_done" || terminal.reason !== "agent_done") {
+      throw new Error("expected valid successful completion");
+    }
+    expect(done.stopReason).toBe(stopReason);
+    expect(terminal.stopReason).toBe(stopReason);
+    expect(terminal.usage).toEqual(usage);
+    expect(terminal.messages.at(-1)).toEqual({
+      role: "assistant",
+      content: [{ type: "text", text: "partial output" }],
+    });
+  });
+
   it("forwards reasoning_delta to the caller but keeps it out of assistant history", async () => {
     const provider = new MockProvider([
       [
         { type: "reasoning_delta", text: "let me think" },
         { type: "text_delta", text: "answer" },
-        { type: "message_stop", stopReason: "end_turn" },
+        { type: "message_stop", stopReason: { kind: "end_turn", raw: "end_turn" } },
       ],
     ]);
     const params = makeParams(provider, new ToolRegistry([]));
@@ -154,11 +250,11 @@ describe("agentLoop", () => {
     const provider = new MockProvider([
       [
         { type: "tool_use", id: "t1", name: "ok_tool", input: {} },
-        { type: "message_stop", stopReason: "tool_use" },
+        { type: "message_stop", stopReason: { kind: "tool_use", raw: "tool_use" } },
       ],
       [
         { type: "text_delta", text: "done" },
-        { type: "message_stop", stopReason: "end_turn" },
+        { type: "message_stop", stopReason: { kind: "end_turn", raw: "end_turn" } },
       ],
     ]);
     const params = makeParams(provider, new ToolRegistry([okTool]));
@@ -183,12 +279,86 @@ describe("agentLoop", () => {
     expect(terminal.reason).toBe("agent_done");
   });
 
+  it("records tool-use turn reason and uses the second turn's reason as final (SR-7)", async () => {
+    const firstReason = { kind: "tool_use", raw: "tool_calls" } as const;
+    const finalReason = { kind: "stop_sequence", raw: "stop_sequence" } as const;
+    const provider = new MockProvider([
+      [
+        { type: "tool_use", id: "t1", name: "ok_tool", input: {} },
+        { type: "message_stop", stopReason: firstReason },
+      ],
+      [
+        { type: "text_delta", text: "done" },
+        { type: "message_stop", stopReason: finalReason },
+      ],
+    ]);
+
+    const { events, terminal } = await collectEvents(
+      agentLoop(makeParams(provider, new ToolRegistry([okTool]))),
+    );
+    const turns = events.filter((event): event is Extract<AgentEvent, { type: "turn_complete" }> => event.type === "turn_complete");
+    expect(turns.map((turn) => turn.stopReason)).toEqual([firstReason, finalReason]);
+    expect(turns[0]?.stopReason).toBe(firstReason);
+    expect(turns[1]?.stopReason).toBe(finalReason);
+    if (terminal.reason !== "agent_done") throw new Error("expected successful terminal");
+    expect(terminal.stopReason).toBe(finalReason);
+    expect(provider.requests).toHaveLength(2);
+  });
+
+  it("executes buffered tools even when stopReason is end_turn (SR-8)", async () => {
+    const inconsistent = { kind: "end_turn", raw: "end_turn" } as const;
+    const finalReason = { kind: "end_turn", raw: "end_turn" } as const;
+    const provider = new MockProvider([
+      [
+        { type: "tool_use", id: "t1", name: "ok_tool", input: {} },
+        { type: "message_stop", stopReason: inconsistent },
+      ],
+      [{ type: "message_stop", stopReason: finalReason }],
+    ]);
+
+    const { events, terminal } = await collectEvents(
+      agentLoop(makeParams(provider, new ToolRegistry([okTool]))),
+    );
+    expect(events).toContainEqual(expect.objectContaining({ type: "tool_result", toolCallId: "t1" }));
+    expect(provider.requests).toHaveLength(2);
+    const firstTurn = events.find((event) => event.type === "turn_complete");
+    if (firstTurn?.type !== "turn_complete" || terminal.reason !== "agent_done") throw new Error("expected completion");
+    expect(firstTurn.stopReason).toBe(inconsistent);
+    expect(terminal.stopReason).toBe(finalReason);
+  });
+
+  it("terminates visibly when stopReason is tool_use but no tools were buffered (SR-8)", async () => {
+    const stopReason = { kind: "tool_use", raw: "tool_use" } as const;
+    const provider = new MockProvider([[{ type: "message_stop", stopReason }]]);
+
+    const { events, terminal } = await collectEvents(
+      agentLoop(makeParams(provider, new ToolRegistry([]))),
+    );
+    expect(provider.requests).toHaveLength(1);
+    expect(events.map((event) => event.type)).toEqual(["turn_complete", "agent_done"]);
+    if (terminal.reason !== "agent_done") throw new Error("expected successful terminal");
+    expect(terminal.stopReason).toBe(stopReason);
+  });
+
+  it("does not resubmit a tool-free pause_turn (SR-9)", async () => {
+    const stopReason = { kind: "pause_turn", raw: "pause_turn" } as const;
+    const provider = new MockProvider([[{ type: "message_stop", stopReason }]]);
+
+    const { events, terminal } = await collectEvents(
+      agentLoop(makeParams(provider, new ToolRegistry([]))),
+    );
+    expect(provider.requests).toHaveLength(1);
+    expect(events.some((event) => event.type === "agent_error")).toBe(false);
+    if (terminal.reason !== "agent_done") throw new Error("expected successful terminal");
+    expect(terminal.stopReason).toBe(stopReason);
+  });
+
   it("stops at maxTurns when the model keeps requesting tools (7.5)", async () => {
     // Provider always returns a tool-use turn, so the loop never completes
     // naturally — the maxTurns guard must stop it.
     const alwaysToolTurn: ProviderEvent[] = [
       { type: "tool_use", id: "t", name: "ok_tool", input: {} },
-      { type: "message_stop", stopReason: "tool_use" },
+      { type: "message_stop", stopReason: { kind: "tool_use", raw: "tool_use" } },
     ];
     const provider = new MockProvider([alwaysToolTurn, alwaysToolTurn, alwaysToolTurn]);
     const params = makeParams(provider, new ToolRegistry([okTool]), { maxTurns: 2 });
@@ -228,16 +398,55 @@ describe("agentLoop", () => {
     expect(terminal.error.message).toBe("network down");
   });
 
+  it("turns a missing message_stop into the exact agent_error while retaining partial text and prior usage (SR-10)", async () => {
+    const priorUsage = { inputTokens: 10, outputTokens: 5, cacheReadTokens: 1 };
+    const provider = new MockProvider([
+      [
+        { type: "tool_use", id: "t1", name: "ok_tool", input: {} },
+        {
+          type: "message_stop",
+          stopReason: { kind: "tool_use", raw: "tool_use" },
+          usage: priorUsage,
+        },
+      ],
+      [{ type: "text_delta", text: "orphaned partial" }],
+    ]);
+
+    const { events, terminal } = await collectEvents(
+      agentLoop(makeParams(provider, new ToolRegistry([okTool]))),
+    );
+    expect(events).toContainEqual({ type: "text_delta", text: "orphaned partial" });
+    const errorEvent = events.at(-1);
+    if (errorEvent?.type !== "agent_error" || terminal.reason !== "agent_error") {
+      throw new Error("expected agent_error terminal");
+    }
+    expect(errorEvent.error.message).toBe("Provider stream ended without message_stop");
+    expect(terminal.error.message).toBe("Provider stream ended without message_stop");
+    expect(errorEvent.usage).toEqual(priorUsage);
+    expect(terminal.usage).toEqual(priorUsage);
+    expect("stopReason" in errorEvent).toBe(false);
+    expect("stopReason" in terminal).toBe(false);
+    expect(errorEvent.messages).toEqual(terminal.messages);
+    expect(errorEvent.messages.some((message) => JSON.stringify(message).includes("orphaned partial"))).toBe(false);
+  });
+
   it("does not push an assistant message for an empty turn", async () => {
     const provider = new MockProvider([
-      [{ type: "message_stop", stopReason: "end_turn" }],
+      [{ type: "message_stop", stopReason: { kind: "end_turn", raw: "end_turn" } }],
     ]);
     const params = makeParams(provider, new ToolRegistry([]));
 
     const { events, terminal } = await collectEvents(agentLoop(params));
 
     expect(events.map((e) => e.type)).toEqual(["turn_complete", "agent_done"]);
-    expect(terminal.reason).toBe("agent_done");
+    const turnComplete = events[0];
+    const done = events[1];
+    if (turnComplete?.type !== "turn_complete" || done?.type !== "agent_done" || terminal.reason !== "agent_done") {
+      throw new Error("expected successful empty completion");
+    }
+    expect(turnComplete.stopReason).toEqual({ kind: "end_turn", raw: "end_turn" });
+    expect(done.stopReason).toEqual({ kind: "end_turn", raw: "end_turn" });
+    expect(terminal.stopReason).toEqual({ kind: "end_turn", raw: "end_turn" });
 
     // No assistant message was appended: only the seed user message remains.
     expect(terminal.messages).toEqual([{ role: "user", content: "hello" }]);
@@ -261,11 +470,11 @@ describe("agentLoop", () => {
       [
         { type: "tool_use", id: "ta", name: "tool_a", input: {} },
         { type: "tool_use", id: "tb", name: "tool_b", input: {} },
-        { type: "message_stop", stopReason: "tool_use" },
+        { type: "message_stop", stopReason: { kind: "tool_use", raw: "tool_use" } },
       ],
       [
         { type: "text_delta", text: "fin" },
-        { type: "message_stop", stopReason: "end_turn" },
+        { type: "message_stop", stopReason: { kind: "end_turn", raw: "end_turn" } },
       ],
     ]);
     const params = makeParams(provider, new ToolRegistry([toolA, toolB]));
@@ -295,13 +504,209 @@ describe("agentLoop", () => {
     expect(blocks.map((b) => b.content)).toEqual(["result-a", "result-b"]);
   });
 
+  it("CB-11–CB-14: reverse-complete safe calls flush isolated child events, results, blocks, and usage in model order", async () => {
+    const gates = [deferred(), deferred()];
+    const started = makeStartedLatch(2);
+    const contexts: ToolCallContext[] = [];
+    const usage = [
+      { inputTokens: 2, outputTokens: 3, cacheReadTokens: 5 },
+      { inputTokens: 7, outputTokens: 11, cacheReadTokens: 13 },
+    ];
+    const safe = defineTool({
+      name: "safe_integrated",
+      description: "controlled concurrent loop integration",
+      inputSchema: z.object({ index: z.number() }),
+      isConcurrencySafe: () => true,
+      call: async ({ index }, _platform, context) => {
+        contexts.push(context);
+        context.emitEvent?.({ type: "text_delta", text: `child-${index}` });
+        context.reportUsage?.(usage[index]!);
+        started.started();
+        await gates[index]!.promise;
+        return `result-${index}`;
+      },
+    });
+    const provider = new MockProvider([
+      [
+        { type: "tool_use", id: "first-id", name: safe.name, input: { index: 0 } },
+        { type: "tool_use", id: "second-id", name: safe.name, input: { index: 1 } },
+        {
+          type: "message_stop",
+          stopReason: { kind: "tool_use", raw: "tool_use" },
+          usage: { inputTokens: 17, outputTokens: 19, cacheReadTokens: 23 },
+        },
+      ],
+      [
+        { type: "text_delta", text: "done" },
+        {
+          type: "message_stop",
+          stopReason: { kind: "end_turn", raw: "end_turn" },
+          usage: { inputTokens: 29, outputTokens: 31, cacheReadTokens: 37 },
+        },
+      ],
+    ]);
+    const collecting = collectEvents(agentLoop(makeParams(provider, new ToolRegistry([safe]))));
+
+    await started.allStarted;
+    gates[1]!.resolve();
+    await Promise.resolve();
+    gates[0]!.resolve();
+    const { events, terminal } = await collecting;
+
+    expect(contexts).toHaveLength(2);
+    expect(contexts[0]).not.toBe(contexts[1]);
+    expect(contexts.map(({ toolCallId }) => toolCallId)).toEqual(["first-id", "second-id"]);
+    const attributed = events.filter((event) =>
+      event.type === "subagent_event" || event.type === "tool_result"
+    );
+    expect(attributed.map((event) => event.type === "subagent_event"
+      ? [event.type, event.taskId, event.event.type === "text_delta" ? event.event.text : event.event.type]
+      : [event.type, event.toolCallId, event.result]
+    )).toEqual([
+      ["subagent_event", "first-id", "child-0"],
+      ["tool_result", "first-id", "result-0"],
+      ["subagent_event", "second-id", "child-1"],
+      ["tool_result", "second-id", "result-1"],
+    ]);
+    const secondRequest = provider.requests[1];
+    if (!secondRequest) throw new Error("expected second provider request");
+    const resultMessage = secondRequest.messages.at(-1);
+    if (!resultMessage || !Array.isArray(resultMessage.content)) throw new Error("expected result blocks");
+    const blocks = resultMessage.content as ToolResultBlock[];
+    expect(blocks.map(({ tool_use_id, content, is_error }) => [tool_use_id, content, is_error])).toEqual([
+      ["first-id", "result-0", false],
+      ["second-id", "result-1", false],
+    ]);
+    expect(terminal.usage).toEqual({
+      inputTokens: 55,
+      outputTokens: 64,
+      cacheReadTokens: 78,
+    });
+  });
+
+  it.each([
+    ["BigInt", () => ({ bad: 1n })],
+    ["circular", () => { const value: { self?: unknown } = {}; value.self = value; return value; }],
+  ])("CB-11: a %s serialization failure is call-local and preserves sibling order", async (_label, badResult) => {
+    const safe = defineTool({
+      name: "safe_serialization",
+      description: "returns controlled serializability",
+      inputSchema: z.object({ bad: z.boolean() }),
+      isConcurrencySafe: () => true,
+      call: async ({ bad }) => bad ? badResult() : "serializable sibling",
+    });
+    const provider = new MockProvider([
+      [
+        { type: "tool_use", id: "bad-id", name: safe.name, input: { bad: true } },
+        { type: "tool_use", id: "good-id", name: safe.name, input: { bad: false } },
+        { type: "message_stop", stopReason: { kind: "tool_use", raw: "tool_use" } },
+      ],
+      [{ type: "message_stop", stopReason: { kind: "stop_sequence", raw: "stop_sequence" } }],
+    ]);
+
+    const { events, terminal } = await collectEvents(
+      agentLoop(makeParams(provider, new ToolRegistry([safe]))),
+    );
+    const results = events.filter(
+      (event): event is Extract<AgentEvent, { type: "tool_result" }> => event.type === "tool_result",
+    );
+    expect(results.map(({ toolCallId, isError }) => [toolCallId, isError])).toEqual([
+      ["bad-id", false],
+      ["good-id", false],
+    ]);
+    const secondRequest = provider.requests[1];
+    if (!secondRequest) throw new Error("expected second provider request");
+    const resultMessage = secondRequest.messages.at(-1);
+    if (!resultMessage || !Array.isArray(resultMessage.content)) throw new Error("expected result blocks");
+    const blocks = resultMessage.content as ToolResultBlock[];
+    expect(blocks.map(({ tool_use_id, is_error }) => [tool_use_id, is_error])).toEqual([
+      ["bad-id", true],
+      ["good-id", false],
+    ]);
+    expect(blocks[0]?.content).toContain("could not serialize result");
+    expect(blocks[1]?.content).toBe("serializable sibling");
+    if (terminal.reason !== "agent_done") throw new Error("expected successful recovery");
+    expect(terminal.stopReason).toEqual({ kind: "stop_sequence", raw: "stop_sequence" });
+  });
+
+  it("CB-18 continuation: cancelled tool results pair before the already-aborted next provider turn becomes agent_error", async () => {
+    const controller = new AbortController();
+    const approvalStarted = deferred();
+    const approvalDecision = deferred<"allow">();
+    const toolCall = vi.fn().mockResolvedValue("must not run");
+    const safe = defineTool({
+      name: "approval_abort",
+      description: "aborted during approval",
+      inputSchema: z.object({}),
+      isConcurrencySafe: () => true,
+      call: toolCall,
+    });
+    class AbortAwareProvider implements Provider {
+      readonly requests: ProviderRequest[] = [];
+      readonly signals: AbortSignal[] = [];
+
+      async *stream(req: ProviderRequest, signal?: AbortSignal): AsyncGenerator<ProviderEvent> {
+        this.requests.push(req);
+        if (!signal) throw new Error("missing signal");
+        this.signals.push(signal);
+        if (this.requests.length === 1) {
+          yield { type: "tool_use", id: "cancel-id", name: safe.name, input: {} };
+          yield { type: "message_stop", stopReason: { kind: "tool_use", raw: "tool_use" } };
+          return;
+        }
+        if (!signal.aborted) throw new Error("expected already-aborted signal");
+        throw new DOMException("provider observed abort", "AbortError");
+      }
+    }
+    const provider = new AbortAwareProvider();
+    const approval = vi.fn(async () => {
+      approvalStarted.resolve();
+      return approvalDecision.promise;
+    });
+    const collecting = collectEvents(agentLoop(makeParams(provider, new ToolRegistry([safe]), {
+      signal: controller.signal,
+      approvalHandler: approval,
+    })));
+
+    await approvalStarted.promise;
+    controller.abort();
+    approvalDecision.resolve("allow");
+    const { events, terminal } = await collecting;
+
+    expect(toolCall).not.toHaveBeenCalled();
+    expect(events).toContainEqual({
+      type: "tool_result",
+      toolName: "approval_abort",
+      toolCallId: "cancel-id",
+      result: "Tool 'approval_abort': call cancelled before start",
+      isError: true,
+    });
+    expect(provider.requests).toHaveLength(2);
+    expect(provider.signals).toEqual([controller.signal, controller.signal]);
+    const secondRequest = provider.requests[1];
+    if (!secondRequest) throw new Error("expected second request");
+    const resultMessage = secondRequest.messages.at(-1);
+    if (!resultMessage || !Array.isArray(resultMessage.content)) throw new Error("expected result block");
+    expect(resultMessage.content).toEqual([{
+      type: "tool_result",
+      tool_use_id: "cancel-id",
+      content: "Tool 'approval_abort': call cancelled before start",
+      is_error: true,
+    }]);
+    expect(events.at(-1)?.type).toBe("agent_error");
+    expect(terminal.reason).toBe("agent_error");
+    if (terminal.reason !== "agent_error") throw new Error("expected agent_error");
+    expect(terminal.error.name).toBe("AbortError");
+    expect(terminal.error.message).toBe("provider observed abort");
+  });
+
   it("surfaces each text_delta incrementally, all before turn_complete (7.18)", async () => {
     const provider = new MockProvider([
       [
         { type: "text_delta", text: "a" },
         { type: "text_delta", text: "b" },
         { type: "text_delta", text: "c" },
-        { type: "message_stop", stopReason: "end_turn" },
+        { type: "message_stop", stopReason: { kind: "end_turn", raw: "end_turn" } },
       ],
     ]);
     const params = makeParams(provider, new ToolRegistry([]));
@@ -340,7 +745,7 @@ describe("agentLoop — usage accumulation", () => {
     const provider = new MockProvider([
       [
         { type: "text_delta", text: "hi" },
-        { type: "message_stop", stopReason: "end_turn" },
+        { type: "message_stop", stopReason: { kind: "end_turn", raw: "end_turn" } },
       ],
     ]);
     const params = makeParams(provider, new ToolRegistry([]));
@@ -363,7 +768,7 @@ describe("agentLoop — usage accumulation", () => {
         { type: "text_delta", text: "hello" },
         {
           type: "message_stop",
-          stopReason: "end_turn",
+          stopReason: { kind: "end_turn", raw: "end_turn" },
           usage: { inputTokens: 10, outputTokens: 5, cacheReadTokens: 0 },
         },
       ],
@@ -388,7 +793,7 @@ describe("agentLoop — usage accumulation", () => {
         { type: "tool_use", id: "t1", name: "ok_tool", input: {} },
         {
           type: "message_stop",
-          stopReason: "tool_use",
+          stopReason: { kind: "tool_use", raw: "tool_use" },
           usage: { inputTokens: 10, outputTokens: 5, cacheReadTokens: 0 },
         },
       ],
@@ -396,7 +801,7 @@ describe("agentLoop — usage accumulation", () => {
         { type: "text_delta", text: "done" },
         {
           type: "message_stop",
-          stopReason: "end_turn",
+          stopReason: { kind: "end_turn", raw: "end_turn" },
           usage: { inputTokens: 3, outputTokens: 2, cacheReadTokens: 0 },
         },
       ],
@@ -419,7 +824,7 @@ describe("agentLoop — usage accumulation", () => {
       { type: "tool_use", id: "t", name: "ok_tool", input: {} },
       {
         type: "message_stop",
-        stopReason: "tool_use",
+        stopReason: { kind: "tool_use", raw: "tool_use" },
         usage: { inputTokens, outputTokens, cacheReadTokens: 0 },
       },
     ];
@@ -460,7 +865,7 @@ describe("agentLoop — usage accumulation", () => {
           yield { type: "tool_use", id: "t1", name: "ok_tool", input: {} };
           yield {
             type: "message_stop",
-            stopReason: "tool_use",
+            stopReason: { kind: "tool_use", raw: "tool_use" },
             usage: { inputTokens: 10, outputTokens: 5, cacheReadTokens: 0 },
           };
         } else {
@@ -494,7 +899,7 @@ describe("agentLoop — usage accumulation", () => {
         { type: "text_delta", text: "hi" },
         {
           type: "message_stop",
-          stopReason: "end_turn",
+          stopReason: { kind: "end_turn", raw: "end_turn" },
           usage: { inputTokens: 10, outputTokens: 5, cacheReadTokens: 0 },
         },
       ],
@@ -516,7 +921,7 @@ describe("agentLoop — usage accumulation", () => {
     const provider = new MockProvider([
       [
         { type: "text_delta", text: "hi" },
-        { type: "message_stop", stopReason: "end_turn" },
+        { type: "message_stop", stopReason: { kind: "end_turn", raw: "end_turn" } },
       ],
     ]);
     const params = makeParams(provider, new ToolRegistry([]));
@@ -622,7 +1027,7 @@ describe("agentLoop — subagent seams", () => {
         { type: "tool_use", id: "r1", name: "report_tool", input: {} },
         {
           type: "message_stop",
-          stopReason: "tool_use",
+          stopReason: { kind: "tool_use", raw: "tool_use" },
           usage: { inputTokens: 10, outputTokens: 5, cacheReadTokens: 0 },
         },
       ],
@@ -630,7 +1035,7 @@ describe("agentLoop — subagent seams", () => {
         { type: "text_delta", text: "done" },
         {
           type: "message_stop",
-          stopReason: "end_turn",
+          stopReason: { kind: "end_turn", raw: "end_turn" },
           usage: { inputTokens: 3, outputTokens: 2, cacheReadTokens: 0 },
         },
       ],
@@ -659,7 +1064,7 @@ describe("agentLoop — subagent seams", () => {
         { type: "tool_use", id: "r1", name: "TOOL", input: {} },
         {
           type: "message_stop",
-          stopReason: "tool_use",
+          stopReason: { kind: "tool_use", raw: "tool_use" },
           usage: { inputTokens: 10, outputTokens: 5, cacheReadTokens: 0 },
         },
       ],
@@ -667,7 +1072,7 @@ describe("agentLoop — subagent seams", () => {
         { type: "text_delta", text: "done" },
         {
           type: "message_stop",
-          stopReason: "end_turn",
+          stopReason: { kind: "end_turn", raw: "end_turn" },
           usage: { inputTokens: 3, outputTokens: 2, cacheReadTokens: 0 },
         },
       ],
@@ -708,7 +1113,7 @@ describe("agentLoop — subagent seams", () => {
         { type: "tool_use", id: "e1", name: "report_then_throw_tool", input: {} },
         {
           type: "message_stop",
-          stopReason: "tool_use",
+          stopReason: { kind: "tool_use", raw: "tool_use" },
           usage: { inputTokens: 10, outputTokens: 5, cacheReadTokens: 0 },
         },
       ],
@@ -716,7 +1121,7 @@ describe("agentLoop — subagent seams", () => {
         { type: "text_delta", text: "recovered" },
         {
           type: "message_stop",
-          stopReason: "end_turn",
+          stopReason: { kind: "end_turn", raw: "end_turn" },
           usage: { inputTokens: 3, outputTokens: 2, cacheReadTokens: 0 },
         },
       ],
@@ -756,11 +1161,11 @@ describe("agentLoop — subagent seams", () => {
     const provider = new MockProvider([
       [
         { type: "tool_use", id: "e1", name: "emit_tool", input: {} },
-        { type: "message_stop", stopReason: "tool_use" },
+        { type: "message_stop", stopReason: { kind: "tool_use", raw: "tool_use" } },
       ],
       [
         { type: "text_delta", text: "fin" },
-        { type: "message_stop", stopReason: "end_turn" },
+        { type: "message_stop", stopReason: { kind: "end_turn", raw: "end_turn" } },
       ],
     ]);
     const params = makeParams(provider, new ToolRegistry([emittingTool]));
@@ -833,11 +1238,11 @@ describe("agentLoop — subagent seams", () => {
       [
         { type: "tool_use", id: "ta", name: "emit_a", input: {} },
         { type: "tool_use", id: "tb", name: "emit_b", input: {} },
-        { type: "message_stop", stopReason: "tool_use" },
+        { type: "message_stop", stopReason: { kind: "tool_use", raw: "tool_use" } },
       ],
       [
         { type: "text_delta", text: "fin" },
-        { type: "message_stop", stopReason: "end_turn" },
+        { type: "message_stop", stopReason: { kind: "end_turn", raw: "end_turn" } },
       ],
     ]);
     const params = makeParams(provider, new ToolRegistry([emitA, emitB]));
@@ -878,11 +1283,11 @@ describe("agentLoop — subagent seams", () => {
     const provider = new MockProvider([
       [
         { type: "tool_use", id: "x1", name: "id_tool", input: {} },
-        { type: "message_stop", stopReason: "tool_use" },
+        { type: "message_stop", stopReason: { kind: "tool_use", raw: "tool_use" } },
       ],
       [
         { type: "text_delta", text: "ok" },
-        { type: "message_stop", stopReason: "end_turn" },
+        { type: "message_stop", stopReason: { kind: "end_turn", raw: "end_turn" } },
       ],
     ]);
     const params = makeParams(provider, new ToolRegistry([idEchoTool]));
@@ -900,11 +1305,11 @@ describe("agentLoop — subagent seams", () => {
     const provider = new MockProvider([
       [
         { type: "tool_use", id: "x1", name: "id_emit_tool", input: {} },
-        { type: "message_stop", stopReason: "tool_use" },
+        { type: "message_stop", stopReason: { kind: "tool_use", raw: "tool_use" } },
       ],
       [
         { type: "text_delta", text: "ok" },
-        { type: "message_stop", stopReason: "end_turn" },
+        { type: "message_stop", stopReason: { kind: "end_turn", raw: "end_turn" } },
       ],
     ]);
     const params = makeParams(provider, new ToolRegistry([idEchoEmitTool]));
@@ -936,11 +1341,11 @@ describe("agentLoop — subagent seams", () => {
     const provider = new MockProvider([
       [
         { type: "tool_use", id: "t1", name: "ok_tool", input: {} },
-        { type: "message_stop", stopReason: "tool_use" },
+        { type: "message_stop", stopReason: { kind: "tool_use", raw: "tool_use" } },
       ],
       [
         { type: "text_delta", text: "done" },
-        { type: "message_stop", stopReason: "end_turn" },
+        { type: "message_stop", stopReason: { kind: "end_turn", raw: "end_turn" } },
       ],
     ]);
     const params = makeParams(provider, new ToolRegistry([okTool]));
@@ -974,7 +1379,7 @@ describe("agentLoop — subagent seams", () => {
         { type: "tool_use", id: "t1", name: "ok_tool", input: {} },
         {
           type: "message_stop",
-          stopReason: "tool_use",
+          stopReason: { kind: "tool_use", raw: "tool_use" },
           usage: { inputTokens: 10, outputTokens: 5, cacheReadTokens: 0 },
         },
       ],
@@ -982,7 +1387,7 @@ describe("agentLoop — subagent seams", () => {
         { type: "text_delta", text: "done" },
         {
           type: "message_stop",
-          stopReason: "end_turn",
+          stopReason: { kind: "end_turn", raw: "end_turn" },
           usage: { inputTokens: 3, outputTokens: 2, cacheReadTokens: 0 },
         },
       ],
@@ -1029,7 +1434,7 @@ describe("agentLoop — subagent seams", () => {
         { type: "tool_use", id: "m1", name: "multi_report_tool", input: {} },
         {
           type: "message_stop",
-          stopReason: "tool_use",
+          stopReason: { kind: "tool_use", raw: "tool_use" },
           usage: { inputTokens: 10, outputTokens: 5, cacheReadTokens: 0 },
         },
       ],
@@ -1037,7 +1442,7 @@ describe("agentLoop — subagent seams", () => {
         { type: "text_delta", text: "done" },
         {
           type: "message_stop",
-          stopReason: "end_turn",
+          stopReason: { kind: "end_turn", raw: "end_turn" },
           usage: { inputTokens: 3, outputTokens: 2, cacheReadTokens: 0 },
         },
       ],
@@ -1070,6 +1475,7 @@ describe("agentLoop — subagent seams", () => {
           type: "terminal",
           reason: "agent_done",
           usage: { inputTokens: 4, outputTokens: 6, cacheReadTokens: 0 },
+          stopReason: { kind: "refusal", raw: "refusal" },
         });
         return "spawned";
       },
@@ -1078,11 +1484,11 @@ describe("agentLoop — subagent seams", () => {
     const provider = new MockProvider([
       [
         { type: "tool_use", id: "term1", name: "terminal_emit_tool", input: {} },
-        { type: "message_stop", stopReason: "tool_use" },
+        { type: "message_stop", stopReason: { kind: "tool_use", raw: "tool_use" } },
       ],
       [
         { type: "text_delta", text: "fin" },
-        { type: "message_stop", stopReason: "end_turn" },
+        { type: "message_stop", stopReason: { kind: "end_turn", raw: "end_turn" } },
       ],
     ]);
     const params = makeParams(provider, new ToolRegistry([terminalEmitTool]));
@@ -1096,6 +1502,7 @@ describe("agentLoop — subagent seams", () => {
       type: "terminal",
       reason: "agent_done",
       usage: { inputTokens: 4, outputTokens: 6, cacheReadTokens: 0 },
+      stopReason: { kind: "refusal", raw: "refusal" },
     });
   });
 
@@ -1119,11 +1526,11 @@ describe("agentLoop — subagent seams", () => {
     const provider = new MockProvider([
       [
         { type: "tool_use", id: "cu1", name: "child_tooluse_emit_tool", input: {} },
-        { type: "message_stop", stopReason: "tool_use" },
+        { type: "message_stop", stopReason: { kind: "tool_use", raw: "tool_use" } },
       ],
       [
         { type: "text_delta", text: "fin" },
-        { type: "message_stop", stopReason: "end_turn" },
+        { type: "message_stop", stopReason: { kind: "end_turn", raw: "end_turn" } },
       ],
     ]);
     const params = makeParams(provider, new ToolRegistry([childToolUseEmitTool]));
@@ -1158,11 +1565,11 @@ describe("agentLoop — subagent seams", () => {
     const provider = new MockProvider([
       [
         { type: "tool_use", id: "et1", name: "emit_then_throw_tool", input: {} },
-        { type: "message_stop", stopReason: "tool_use" },
+        { type: "message_stop", stopReason: { kind: "tool_use", raw: "tool_use" } },
       ],
       [
         { type: "text_delta", text: "recovered" },
-        { type: "message_stop", stopReason: "end_turn" },
+        { type: "message_stop", stopReason: { kind: "end_turn", raw: "end_turn" } },
       ],
     ]);
     const params = makeParams(provider, new ToolRegistry([emitThenThrowTool]));
@@ -1199,11 +1606,11 @@ describe("agentLoop — subagent seams", () => {
       [
         { type: "tool_use", id: "e1", name: "emit_tool", input: {} },
         { type: "tool_use", id: "o1", name: "ok_tool", input: {} },
-        { type: "message_stop", stopReason: "tool_use" },
+        { type: "message_stop", stopReason: { kind: "tool_use", raw: "tool_use" } },
       ],
       [
         { type: "text_delta", text: "fin" },
-        { type: "message_stop", stopReason: "end_turn" },
+        { type: "message_stop", stopReason: { kind: "end_turn", raw: "end_turn" } },
       ],
     ]);
     const params = makeParams(provider, new ToolRegistry([emittingTool, okTool]));
@@ -1236,5 +1643,62 @@ describe("agentLoop — subagent seams", () => {
     for (const i of subIdxs) {
       expect(i > firstResultIdx && i < secondResultIdx).toBe(false);
     }
+  });
+
+  it("CB-20: stale callbacks retained from a prior turn cannot contaminate a later turn", async () => {
+    let retainedEmit: ToolCallContext["emitEvent"];
+    let retainedReport: ToolCallContext["reportUsage"];
+    const staleUsage = { inputTokens: 100, outputTokens: 200, cacheReadTokens: 300 };
+    const liveUsage = { inputTokens: 4, outputTokens: 5, cacheReadTokens: 6 };
+
+    const retainingTool = defineTool({
+      name: "retain_callbacks",
+      description: "retains its per-call callbacks",
+      inputSchema: z.object({ turn: z.number() }),
+      call: async ({ turn }, _platform, context) => {
+        if (turn === 1) {
+          retainedEmit = context.emitEvent;
+          retainedReport = context.reportUsage;
+          context.emitEvent?.({ type: "text_delta", text: "turn-one-live" });
+        } else {
+          retainedEmit?.({ type: "text_delta", text: "turn-one-stale" });
+          retainedReport?.(staleUsage);
+          context.emitEvent?.({ type: "text_delta", text: "turn-two-live" });
+          context.reportUsage?.(liveUsage);
+        }
+        return `turn-${turn}`;
+      },
+    });
+    const provider = new MockProvider([
+      [
+        { type: "tool_use", id: "turn-one-id", name: retainingTool.name, input: { turn: 1 } },
+        { type: "message_stop", stopReason: { kind: "tool_use", raw: "tool_use" } },
+      ],
+      [
+        { type: "tool_use", id: "turn-two-id", name: retainingTool.name, input: { turn: 2 } },
+        { type: "message_stop", stopReason: { kind: "tool_use", raw: "tool_use" } },
+      ],
+      [
+        { type: "text_delta", text: "done" },
+        { type: "message_stop", stopReason: { kind: "end_turn", raw: "end_turn" } },
+      ],
+    ]);
+
+    const { events, terminal } = await collectEvents(
+      agentLoop(makeParams(provider, new ToolRegistry([retainingTool]))),
+    );
+    const childEvents = events.filter(
+      (event): event is Extract<AgentEvent, { type: "subagent_event" }> =>
+        event.type === "subagent_event",
+    );
+
+    expect(childEvents.map(({ taskId, event }) => [
+      taskId,
+      event.type === "text_delta" ? event.text : event.type,
+    ])).toEqual([
+      ["turn-one-id", "turn-one-live"],
+      ["turn-two-id", "turn-two-live"],
+    ]);
+    expect(terminal.usage).toEqual(liveUsage);
   });
 });

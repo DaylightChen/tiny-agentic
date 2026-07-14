@@ -7,6 +7,7 @@
     "test": "pnpm -r test",
     "lint": "eslint packages/*/src --max-warnings 0",
     "typecheck": "pnpm -r typecheck",
+    "typecheck:examples": "tsc -p examples/tsconfig.json",
     "example": "tsx examples/basic-run.ts",
     "example:fs-discovery": "tsx examples/fs-discovery-run.ts"
   },

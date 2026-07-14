@@ -122,7 +122,7 @@ export function sanitizeChildEvent(event: AgentEvent): SubagentChildEvent | unde
     case "tool_result":
       return { type: "tool_result", toolName: event.toolName, toolCallId: event.toolCallId, isError: event.isError };
     case "agent_done":
-      return { type: "terminal", reason: "agent_done", usage: event.usage };
+      return { type: "terminal", reason: "agent_done", usage: event.usage, stopReason: event.stopReason };
     case "max_turns_exceeded":
       return { type: "terminal", reason: "max_turns_exceeded", usage: event.usage };
     case "agent_error":

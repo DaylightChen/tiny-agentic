@@ -10,7 +10,7 @@ project
 ## Current Phase
 **implement** (complete) — ✅ **Milestone 1 DONE**
 
-> **M1 complete (2026-06-29).** The `tiny-agentic` core package is functionally done: all 10 implement tasks landed via the Opus dev-loop (implement → test → review), each with `brief.md` + `completion.md`. Final state under Node 22: **91 unit tests green**, `typecheck` / `lint` / `build` clean. `implement` is the terminal phase, so the project-scope workflow is complete. Git history preserved throughout (the earlier Sonnet run is tagged `sonnet-run-checkpoint`).
+> **M1 complete (2026-06-29).** The project-scope workflow remains complete. Subsequent feature scopes have added OpenAI, approvals and run controls, Task sub-agents, filesystem discovery, reasoning events, normalized stop reasons, a portable main module graph, and ordered concurrent batches for approved safe filesystem tools. Verification counts evolve with those features; current release-readiness evidence is recorded in their task logs rather than frozen here.
 
 ## Last Completed
 - `research` satisfied (2026-06-27, backfilled). Output: `docs/project/research/` subsystem map.

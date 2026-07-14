@@ -1,3 +1,4 @@
+/** Explicit Node platform module; owns native discovery traversal and ordering. */
 import { readdir, lstat, readFile, stat } from "node:fs/promises";
 import { join, relative, resolve, sep } from "node:path";
 import ignore from "ignore";
@@ -154,14 +155,14 @@ async function* walk(
 }
 
 /**
- * Ordering: mtime-desc in production, name-asc under NODE_ENV==='test' for
- * deterministic snapshots. `process` is permitted inside platform/**.
+ * Final Node discovery order is path ascending in test mode, otherwise mtime
+ * descending with full path ascending as the equal-mtime tie-break.
  */
 function sortWalked(files: WalkedFile[]): WalkedFile[] {
-  if (process.env.NODE_ENV === "test") {
-    return [...files].sort((a, b) => (a.path < b.path ? -1 : a.path > b.path ? 1 : 0));
-  }
-  return [...files].sort((a, b) => b.mtimeMs - a.mtimeMs);
+  const comparePath = (a: WalkedFile, b: WalkedFile): number =>
+    a.path < b.path ? -1 : a.path > b.path ? 1 : 0;
+  if (process.env.NODE_ENV === "test") return [...files].sort(comparePath);
+  return [...files].sort((a, b) => b.mtimeMs - a.mtimeMs || comparePath(a, b));
 }
 
 function resolveWalkOptions(o: {

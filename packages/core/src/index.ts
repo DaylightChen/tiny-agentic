@@ -11,7 +11,7 @@ export type { AgentEvent, Terminal } from "./types/events.js";
 export type { Message, ContentBlock, TextBlock, ToolUseBlock, ToolResultBlock } from "./types/messages.js";
 export type { Tool, ToolCallContext } from "./types/tool.js";
 export { defineTool } from "./types/tool.js";
-export type { Provider, ProviderRequest, ProviderEvent, ToolSchema, Logger, LogEntry } from "./types/provider.js";
+export type { Provider, ProviderRequest, ProviderEvent, StopReasonKind, StopReason, ToolSchema, Logger, LogEntry } from "./types/provider.js";
 export type { Platform, ExecOptions, ExecResult, DirEntry, GlobOptions, GlobResult, GrepMatch, GrepOptions, GrepPlatformResult } from "./types/platform.js";
 
 export { readFileTool } from "./tools/builtin/readFile.js";

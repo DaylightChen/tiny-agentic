@@ -1,24 +1,29 @@
 import { vi, describe, it, expect, beforeEach, afterEach } from "vitest";
 
+import { Agent } from "../agent.js";
+import { NodePlatform } from "../platform/node.js";
+import { collectEvents } from "../utils/collect.js";
 import type { ProviderEvent } from "../types/provider.js";
 
 // Mock the Anthropic SDK so no network is touched and the streaming path runs to
 // completion. vi.mock is hoisted above the imports below, so the top-level
 // `import { AnthropicProvider }` picks up this stub.
 const streamSpy = vi.fn();
+let streamImpl: () => AsyncGenerator<unknown>;
+
+async function* defaultStream(): AsyncGenerator<unknown> {
+  yield { type: "message_start", message: {} };
+  yield { type: "message_delta", delta: { stop_reason: "end_turn" } };
+  yield { type: "message_stop" };
+}
 
 vi.mock("@anthropic-ai/sdk", () => {
-  async function* fakeStream() {
-    yield { type: "message_start", message: {} };
-    yield { type: "message_delta", delta: { stop_reason: "end_turn" } };
-    yield { type: "message_stop" };
-  }
   return {
     default: class {
       messages = {
         stream: (...args: unknown[]) => {
           streamSpy(...args);
-          return fakeStream();
+          return streamImpl();
         },
       };
     },
@@ -38,6 +43,7 @@ async function drain(gen: AsyncGenerator<ProviderEvent>): Promise<ProviderEvent[
 describe("AnthropicProvider", () => {
   beforeEach(() => {
     streamSpy.mockClear();
+    streamImpl = defaultStream;
   });
 
   afterEach(() => {
@@ -54,13 +60,44 @@ describe("AnthropicProvider", () => {
       provider.stream({ systemPrompt: "", messages: [], tools: [] }),
     );
 
-    // Stream ran to completion (sanity: message_stop translated through).
-    expect(events.some((e) => e.type === "message_stop")).toBe(true);
+    // Stream ran to completion and the provider boundary emitted a structured reason.
+    expect(events).toEqual([
+      { type: "message_stop", stopReason: { kind: "end_turn", raw: "end_turn" } },
+    ]);
 
     // The real 7.14 check: nothing is emitted to the console without a logger.
     expect(logSpy).not.toHaveBeenCalled();
     expect(errorSpy).not.toHaveBeenCalled();
     expect(warnSpy).not.toHaveBeenCalled();
+  });
+
+  it("preserves an unknown native reason through the provider integration", async () => {
+    streamImpl = async function* () {
+      yield { type: "message_delta", delta: { stop_reason: "future_reason" } };
+      yield { type: "message_stop" };
+    };
+
+    const provider = new AnthropicProvider({ apiKey: "k", model: "m" });
+    await expect(drain(provider.stream({ systemPrompt: "", messages: [], tools: [] }))).resolves.toEqual([
+      { type: "message_stop", stopReason: { kind: "other", raw: "future_reason" } },
+    ]);
+  });
+
+  it("flows a provider-native unknown reason through Agent to the structured Terminal (SR-13)", async () => {
+    streamImpl = async function* () {
+      yield { type: "content_block_delta", delta: { type: "text_delta", text: "partial" } };
+      yield { type: "message_delta", delta: { stop_reason: "future_reason" } };
+      yield { type: "message_stop" };
+    };
+
+    const provider = new AnthropicProvider({ apiKey: "k", model: "m" });
+    const { events, terminal } = await collectEvents(
+      new Agent({ provider, tools: [], platform: new NodePlatform() }).run("test"),
+    );
+
+    expect(events).toContainEqual({ type: "text_delta", text: "partial" });
+    if (terminal.reason !== "agent_done") throw new Error("expected successful terminal");
+    expect(terminal.stopReason).toEqual({ kind: "other", raw: "future_reason" });
   });
 
   it("fires the logger with request_sent when a logger is provided", async () => {
